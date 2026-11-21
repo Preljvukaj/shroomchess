@@ -3,6 +3,7 @@ import { distanceToPolygonEdge, pointInPolygon } from '../../xr/math/vec2';
 import type { QualityProfile } from '../scene';
 import { GLSL_FOG, PALETTE, mulberry32, safeMerge, worldUniforms } from '../shared';
 import { type Basin, regionRadius } from './basin';
+import { FLORA_FOOT, FLORA_HEIGHT, type FloraKind, floraGeometry, floraInstanceAttributes, floraMaterial, hangingStrands } from './flora';
 import { DETAIL, SPECIES, type SpeciesDef, attachInstanceAttributes, speciesGeometry, speciesMaterial } from './mushrooms';
 
 /**
@@ -140,6 +141,8 @@ export interface GroundedObject {
   kind: string;
   base: THREE.Vector3;
   footRadius: number;
+  /** ungefähre Objekthöhe (m) – für den Knöchel-Test am Rand der Spielfläche */
+  height?: number;
 }
 
 interface Placement {
@@ -222,34 +225,96 @@ function bandPoint(b: Basin, rng: () => number, dMin: number, dMax: number, minO
 interface ShroomInstance {
   p: Placement;
   species: number;
+  /** feste LOD-Stufe (z. B. Baby-Pilze) statt Zonen-Zuordnung */
+  fixedLod?: 0 | 1 | 2;
 }
 
 const debugGround = () => !!(globalThis as unknown as { __myzelDebugGround?: boolean }).__myzelDebugGround;
 
-function buildSpeciesMeshes(list: ShroomInstance[], detail: (typeof DETAIL)[keyof typeof DETAIL], sway: number, seedBase: number, rng: () => number, b: Basin): THREE.InstancedMesh[] {
+/**
+ * LOD-Zuordnung nach Abstand zur Spielfläche: Zone 0 (Hang), 1 (Rand/dahinter), 2 (fern).
+ * Objekte im Band ±1 m um eine Zonengrenze liegen in BEIDEN Stufen und werden abhängig vom
+ * Kameraabstand komplementär gedithert überblendet (role 1 = nahe Stufe, role 2 = ferne Stufe).
+ * Alle anderen bleiben ohne Überblendung in ihrer Stufe (kein Mehraufwand).
+ */
+export interface LodSlot {
+  lod: 0 | 1 | 2;
+  role: 0 | 1 | 2;
+  fade: number;
+}
+
+export function lodSlots(b: Basin, x: number, z: number, maxLod: 0 | 1 | 2 = 2, band = 1.0): LodSlot[] {
+  const t = b.thetaOf(x, z);
+  const d = b.distOutside(x, z);
+  const f = Math.hypot(x - b.center.x, z - b.center.z); // Überblend-Abstand (Kamera steht in der Fläche)
+  const b1 = b.rimDistance(t) + 0.5;
+  const b2 = b.rimDistance(t) + 9;
+  let slots: LodSlot[];
+  if (d < b1 - band) slots = [{ lod: 0, role: 0, fade: f }];
+  else if (d <= b1 + band) slots = [{ lod: 0, role: 1, fade: f }, { lod: 1, role: 2, fade: f }];
+  else if (d < b2 - band) slots = [{ lod: 1, role: 0, fade: f }];
+  else if (d <= b2 + band) slots = [{ lod: 1, role: 1, fade: f }, { lod: 2, role: 2, fade: f }];
+  else slots = [{ lod: 2, role: 0, fade: f }];
+  // Arten ohne ferne Stufen: auf die höchste verfügbare begrenzen (Überblendung entfällt dann)
+  const clamped = slots.map((s) => ({ ...s, lod: Math.min(s.lod, maxLod) as 0 | 1 | 2 }));
+  if (clamped.length === 2 && clamped[0].lod === clamped[1].lod) return [{ lod: clamped[0].lod, role: 0, fade: f }];
+  return clamped;
+}
+
+/** Farbschwerpunkt je Seite der Senke (Orientierung): vier Sektoren mit weichem, verrauschtem Übergang. */
+const SIDE_PALETTES: [THREE.Color, THREE.Color][] = [
+  [new THREE.Color('#1de9c9'), new THREE.Color('#8b3dff')], // Türkis / Violett
+  [new THREE.Color('#ff2fb3'), new THREE.Color('#ff8a3d')], // Magenta / Orange
+  [new THREE.Color('#2fd8ff'), new THREE.Color('#9dff3a')], // Cyan / Giftgrün
+  [new THREE.Color('#b04dff'), new THREE.Color('#ff6bd5')], // Violett / Rosa
+];
+
+export function sidePalette(theta: number, jitter: number): [THREE.Color, THREE.Color] {
+  const u = (((theta + Math.PI) / (Math.PI * 2)) * 4 + jitter * 0.6 + 4) % 4;
+  const i = Math.floor(u);
+  const k = THREE.MathUtils.smoothstep(u - i, 0.75, 1); // weicher Übergang zum Nachbarsektor
+  const [a0, b0] = SIDE_PALETTES[i];
+  const [a1, b1] = SIDE_PALETTES[(i + 1) % 4];
+  return [a0.clone().lerp(a1, k), b0.clone().lerp(b1, k)];
+}
+
+function buildSpeciesMeshes(list: ShroomInstance[], sway: number, rng: () => number, b: Basin, profileDetail: 'low' | 'medium' | 'high'): THREE.InstancedMesh[] {
   const out: THREE.InstancedMesh[] = [];
+  const details = [DETAIL[profileDetail], DETAIL.far, DETAIL.vfar];
   SPECIES.forEach((sp: SpeciesDef, si) => {
-    const mine = list.filter((x) => x.species === si);
-    if (mine.length === 0) return;
-    const geo = speciesGeometry(sp, detail, seedBase + si * 101);
-    const attrs = attachInstanceAttributes(geo, mine.length);
-    const mesh = new THREE.InstancedMesh(geo, speciesMaterial(sp, sway), mine.length);
-    const m = new THREE.Matrix4();
-    mine.forEach((it, i) => {
-      const s = it.p.scale;
-      m.compose(it.p.pos, it.p.quat, new THREE.Vector3(s * (0.9 + rng() * 0.2), s, s * (0.9 + rng() * 0.2)));
-      mesh.setMatrixAt(i, m);
-      const h = (rng() - 0.5) * 0.25;
-      attrs.tint.set([1 + h, 1 - Math.abs(h) * 0.5, 1 - h], i * 3);
-      // Debug (?debug=ground): Basis > 3 cm neben dem Gelände → rot
-      if (debugGround() && groundError(b, it.p.pos, it.p.foot) > 0.03) attrs.tint.set([6, 0, 0], i * 3);
-      attrs.phase[i] = rng();
-      attrs.seed[i] = rng();
+    // neue Riesenarten haben nur zwei Stufen (nah, fern) → begrenzt Draw Calls
+    const maxLod: 0 | 1 | 2 = sp.tiers || sp.jelly || sp.stem === 'spiral' ? 1 : 2;
+    const perLod: { it: ShroomInstance; slot: LodSlot }[][] = [[], [], []];
+    for (const it of list) {
+      if (it.species !== si) continue;
+      const slots = it.fixedLod !== undefined ? [{ lod: it.fixedLod, role: 0 as const, fade: 0 }] : lodSlots(b, it.p.pos.x, it.p.pos.z, maxLod);
+      for (const slot of slots) perLod[slot.lod].push({ it, slot });
+    }
+    perLod.forEach((items, lod) => {
+      if (!items.length) return;
+      const geo = speciesGeometry(sp, details[lod], 77 + si * 101 + lod * 7);
+      const attrs = attachInstanceAttributes(geo, items.length);
+      const mesh = new THREE.InstancedMesh(geo, speciesMaterial(sp, lod === 2 ? 0 : sway), items.length);
+      const m = new THREE.Matrix4();
+      items.forEach(({ it, slot }, i) => {
+        const s = it.p.scale;
+        const r1 = 0.9 + ((it.p.pos.x * 13.7 + it.p.pos.z * 7.1) % 1 + 1) % 1 * 0.2; // deterministisch je Instanz (beide LOD-Kopien gleich)
+        m.compose(it.p.pos, it.p.quat, new THREE.Vector3(s * r1, s, s * (2 - r1)));
+        mesh.setMatrixAt(i, m);
+        const [ca] = sidePalette(b.thetaOf(it.p.pos.x, it.p.pos.z), Math.sin(it.p.pos.x * 0.7) * Math.cos(it.p.pos.z * 0.6));
+        // Farbschwerpunkt der Senkenseite leicht in die Leuchtfarben mischen
+        attrs.tint.set([0.75 + ca.r * 0.45, 0.75 + ca.g * 0.45, 0.75 + ca.b * 0.45], i * 3);
+        if (debugGround() && groundError(b, it.p.pos, it.p.foot) > 0.03) attrs.tint.set([6, 0, 0], i * 3);
+        attrs.phase[i] = (Math.abs(Math.sin(it.p.pos.x * 12.9 + it.p.pos.z * 78.2)) * 43758.5) % 1;
+        attrs.seed[i] = (attrs.phase[i] * 7.3) % 1;
+        attrs.lod.set([slot.fade, slot.role], i * 2);
+      });
+      void rng;
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.name = `shroom-${sp.id}-${['near', 'far', 'vfar'][lod]}`;
+      out.push(mesh);
     });
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    mesh.name = `shroom-${sp.id}-${detail === DETAIL.vfar ? 'vfar' : detail.far ? 'far' : 'near'}`;
-    out.push(mesh);
   });
   return out;
 }
@@ -270,6 +335,8 @@ export interface Vegetation {
   attractors: THREE.Vector3[];
   /** Bodennahe Punkte in der Vegetation (Zirp-Quellen der Insekten). */
   chirpSpots: THREE.Vector3[];
+  /** Klangquellen der Pflanzen und Pilze (für die Geräuschkulisse). */
+  soundSpots: { bubbles: THREE.Vector3[]; vines: THREE.Vector3[]; giants: THREE.Vector3[]; drips: THREE.Vector3[]; leaves: THREE.Vector3[] };
   /** Alle platzierten Objekte (für Bodenkontakt-Test/Debug). */
   grounded: GroundedObject[];
 }
@@ -284,14 +351,15 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
   const avgRim = b.rimDistance(0);
   const keepOut = (pad: number) => (t: number) => b.rimStart(t) + pad;
 
-  const record = (kind: string, p: Placement) => grounded.push({ kind, base: p.pos.clone(), footRadius: p.foot });
+  const record = (kind: string, p: Placement, height?: number) => grounded.push({ kind, base: p.pos.clone(), footRadius: p.foot, height });
 
-  /** Punkte in Gruppen (Büscheln) statt gleichmäßig verteilt. */
-  const clustered = (n: number, dMin: number, dMax: number, spread: number, perCluster: number, pad: number) => {
+  /** Punkte in Gruppen (Büscheln) statt gleichmäßig verteilt; `minOut` = Mindestabstand außerhalb der Fläche. */
+  const clustered = (n: number, dMin: number, dMax: number, spread: number, perCluster: number, pad: number, minOut?: (t: number) => number) => {
+    const out = minOut ?? keepOut(pad);
     const pts: { x: number; z: number }[] = [];
     let guard = 0;
     while (pts.length < n && guard++ < n * 40) {
-      const c = bandPoint(b, rng, dMin, dMax, keepOut(pad));
+      const c = bandPoint(b, rng, dMin, dMax, out);
       if (!c) continue;
       const k = 1 + Math.floor(rng() * perCluster);
       for (let i = 0; i < k && pts.length < n; i++) {
@@ -299,32 +367,35 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
         const r = Math.sqrt(rng()) * spread;
         const x = c.x + Math.cos(a) * r;
         const z = c.z + Math.sin(a) * r;
-        if (b.distOutside(x, z) >= keepOut(pad)(b.thetaOf(x, z))) pts.push({ x, z });
+        if (b.distOutside(x, z) >= out(b.thetaOf(x, z))) pts.push({ x, z });
       }
     }
     return pts;
   };
 
   const footOf = (sp: SpeciesDef, scale: number) => scale * (sp.cluster > 1 ? 0.2 : sp.stemR * (sp.stem === 'bulb' ? 2.2 : 1.5));
+  const idx = (id: string) => SPECIES.findIndex((s) => s.id === id);
 
-  // --- Hang: volle Geometrie mit Lamellen ---
-  const near: ShroomInstance[] = [];
-  const nearSpecies = SPECIES.map((s, i) => ({ s, i })).filter((x) => x.s.id !== 'riesenschirm');
+  // --- Hang: mittelhohe Pilze (volle Geometrie mit Lamellen) ---
+  const all: ShroomInstance[] = [];
+  const nearSpecies = SPECIES.map((s, i) => ({ s, i })).filter((x) => !['riesenschirm', 'etagenpilz', 'spiralpilz', 'gallertpilz'].includes(x.s.id));
   for (const pt of clustered(profile.nearShrooms, avgStart + 0.2, avgRim + 1.2, 1.2, 5, 0.15)) {
     const si = nearSpecies[Math.floor(rng() * nearSpecies.length)].i;
     const scale = 0.25 + Math.pow(rng(), 1.8) * 1.6;
-    near.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 15 }), species: si });
+    all.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 15 }), species: si });
   }
-  // Riesenpilze am Rand, leicht nach innen geneigt (Gesamtneigung ≤ 20°)
-  const giantSpecies = ['riesenschirm', 'schirmling', 'glockenhut', 'buckelkappe'].map((id) => SPECIES.findIndex((s) => s.id === id));
-  for (const pt of clustered(profile.rimGiants, avgRim - 1.5, avgRim + 1.5, 2.5, 3, 0.3)) {
+  // Oben am Rand und dahinter: Riesenpilze (inkl. gestapelte Hüte, Spiralstiele, Gallerthüte), leicht nach innen geneigt
+  const giantSpecies = ['riesenschirm', 'schirmling', 'glockenhut', 'buckelkappe', 'etagenpilz', 'spiralpilz', 'gallertpilz'].map(idx);
+  const giants: ShroomInstance[] = [];
+  for (const pt of clustered(profile.rimGiants, avgRim - 1.5, avgRim + 3, 2.5, 3, 0.3)) {
     const si = giantSpecies[Math.floor(rng() * giantSpecies.length)];
     const scale = 3 + rng() * 3.5;
-    near.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 8, jitterDeg: 3, leanInwardDeg: 4 + rng() * 6 }), species: si });
+    const it = { p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 8, jitterDeg: 3, leanInwardDeg: 4 + rng() * 6 }), species: si };
+    all.push(it);
+    giants.push(it);
   }
-  // Baby-Pilze (Fern-Geometrie: Lamellen wären bei 5–20 cm unsichtbar)
-  const babies: ShroomInstance[] = [];
-  const parents = near.filter((x) => x.p.scale > 0.8);
+  // Baby-Pilze / Mini-Kolonien rund um größere Exemplare (feste Fern-Geometrie, Lamellen wären unsichtbar)
+  const parents = all.filter((x) => x.p.scale > 0.8);
   for (let k = 0; k < profile.babies && parents.length; k++) {
     const par = parents[Math.floor(rng() * parents.length)];
     const a = rng() * Math.PI * 2;
@@ -333,33 +404,92 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
     const z = par.p.pos.z + Math.sin(a) * r;
     if (b.distOutside(x, z) < keepOut(0.15)(b.thetaOf(x, z))) continue;
     const scale = 0.05 + rng() * 0.14;
-    babies.push({ p: groundPlace(b, rng, x, z, scale, footOf(SPECIES[par.species], scale), { maxTiltDeg: 15 }), species: par.species });
+    all.push({ p: groundPlace(b, rng, x, z, scale, footOf(SPECIES[par.species], scale), { maxTiltDeg: 15 }), species: par.species, fixedLod: 1 });
   }
-  for (const m of buildSpeciesMeshes(near, DETAIL[profile.shroomDetail], 0.025, 77, rng, b)) group.add(m);
-  for (const it of near) {
-    record('shroom', it.p);
-    if (it.p.scale >= 0.6 && attractors.length < 48) attractors.push(it.p.pos.clone().add(new THREE.Vector3(0, 0.85 * it.p.scale, 0).applyQuaternion(it.p.quat)));
-  }
-
-  // --- hinter dem Wall: Fern-LOD, in Gruppen ---
-  const far: ShroomInstance[] = [...babies];
+  // Hinter dem Wall und weit weg: dichte Büschel (Fern-LOD bzw. Low-Poly, automatisch per Zone)
   for (const pt of clustered(profile.farShrooms, avgRim + 1.5, avgRim + 12, 3, 6, 0.3)) {
     const si = Math.floor(rng() * SPECIES.length);
     const scale = 1.2 + rng() * 3.5;
-    far.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 12 }), species: si });
+    all.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 12 }), species: si });
   }
-  for (const m of buildSpeciesMeshes(far, DETAIL.far, 0.006, 177, rng, b)) group.add(m);
-  far.forEach((it) => record('shroom-far', it.p));
-
-  // --- weit weg: Low-Poly-3D-Pilze, dichte Büschel (ersetzt Billboards) ---
-  const vfar: ShroomInstance[] = [];
   for (const pt of clustered(profile.vfarShrooms, avgRim + 10, avgRim + 32, 4, 9, 0.3)) {
-    const si = Math.floor(rng() * SPECIES.length);
+    const si = nearSpecies[Math.floor(rng() * nearSpecies.length)].i;
     const scale = 1.5 + rng() * 5.5;
-    vfar.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 10 }), species: si });
+    all.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 10 }), species: si });
   }
-  for (const m of buildSpeciesMeshes(vfar, DETAIL.vfar, 0.0, 277, rng, b)) group.add(m);
-  vfar.forEach((it) => record('shroom-vfar', it.p));
+  for (const m of buildSpeciesMeshes(all, 0.025, rng, b, profile.shroomDetail)) group.add(m);
+  for (const it of all) {
+    record(it.fixedLod !== undefined ? 'shroom-baby' : 'shroom', it.p, it.p.scale);
+    if (it.p.scale >= 0.6 && it.p.scale < 3 && attractors.length < 48) attractors.push(it.p.pos.clone().add(new THREE.Vector3(0, 0.85 * it.p.scale, 0).applyQuaternion(it.p.quat)));
+  }
+
+  // --- Neue Alien-Flora ---
+  const floraKinds: FloraKind[] = ['bubble', 'tentacle', 'fan', 'coral', 'leaf', 'capsule', 'clumpA', 'clumpB'];
+  const MAXLOD: Record<FloraKind, 0 | 1 | 2> = { bubble: 1, tentacle: 1, fan: 1, coral: 2, leaf: 2, capsule: 1, clumpA: 0, clumpB: 0 };
+  const floraInst: Record<FloraKind, Placement[]> = { bubble: [], tentacle: [], fan: [], coral: [], leaf: [], capsule: [], clumpA: [], clumpB: [] };
+  const placeFlora = (kind: FloraKind, n: number, dMin: number, dMax: number, s0: number, s1: number, spread: number, per: number, minOut?: (t: number) => number) => {
+    for (const pt of clustered(n, dMin, dMax, spread, per, 0.15, minOut)) {
+      const s = s0 + (s1 - s0) * Math.pow(rng(), 1.6);
+      const pl = groundPlace(b, rng, pt.x, pt.z, s * FLORA_HEIGHT[kind], s * FLORA_FOOT[kind], kind.startsWith('clump') ? { align: 'normal' } : { maxTiltDeg: 15 });
+      pl.scale = s; // Instanz-Skalierung (Geometrie ist auf Einheitsgröße gebaut)
+      floraInst[kind].push(pl);
+      record(`flora-${kind}`, pl, s * FLORA_HEIGHT[kind]);
+    }
+  };
+  const fl = profile.flora;
+  // Direkt am Rand der braunen Fläche: nur niedrige Büschel (≤ 30 cm), im flachen Streifen vor dem Hangfuß
+  const stripOut = () => 0.15;
+  placeFlora('clumpA', Math.round(fl.clumpA * 0.6), 0.15, avgStart, 0.6, 1.1, 0.6, 3, stripOut);
+  placeFlora('clumpB', Math.round(fl.clumpB * 0.5), 0.2, avgStart, 0.6, 1.2, 0.6, 2, stripOut);
+  // Hänge: mittelhohe Pflanzen
+  placeFlora('clumpA', Math.round(fl.clumpA * 0.4), avgStart + 0.2, avgRim + 2, 0.8, 1.8, 1.0, 4);
+  placeFlora('clumpB', Math.round(fl.clumpB * 0.5), avgStart + 0.2, avgRim + 2, 0.8, 2.0, 1.0, 3);
+  placeFlora('bubble', fl.bubble, avgStart + 0.3, avgRim + 2, 0.6, 1.6, 1.2, 4);
+  placeFlora('tentacle', fl.tentacle, avgStart + 0.3, avgRim + 1.5, 0.6, 1.5, 1.0, 4);
+  placeFlora('fan', fl.fan, avgStart + 0.4, avgRim + 3, 0.7, 1.8, 1.4, 5);
+  placeFlora('capsule', fl.capsule, avgStart + 0.3, avgRim + 2, 0.7, 1.5, 1.0, 4);
+  // Rand und dahinter: Korallen und Riesenblätter in Riesengröße, dichteste Vegetation
+  placeFlora('coral', Math.round(fl.coral * 0.5), avgStart + 0.5, avgRim + 2, 0.8, 1.8, 1.2, 4);
+  placeFlora('coral', Math.round(fl.coral * 0.5), avgRim - 0.5, avgRim + 14, 2.0, 4.5, 3.0, 6);
+  placeFlora('leaf', Math.round(fl.leaf * 0.5), avgStart + 0.5, avgRim + 2, 0.9, 1.8, 1.2, 3);
+  placeFlora('leaf', Math.round(fl.leaf * 0.5), avgRim - 0.5, avgRim + 14, 2.0, 4.0, 3.0, 5);
+
+  for (const kind of floraKinds) {
+    const perLod: { p: Placement; slot: LodSlot }[][] = [[], [], []];
+    for (const p of floraInst[kind]) for (const slot of lodSlots(b, p.pos.x, p.pos.z, MAXLOD[kind])) perLod[slot.lod].push({ p, slot });
+    perLod.forEach((items, lod) => {
+      if (!items.length) return;
+      const geo = floraGeometry(kind, lod as 0 | 1 | 2, 31);
+      const attrs = floraInstanceAttributes(geo, items.length);
+      const mesh = new THREE.InstancedMesh(geo, floraMaterial(kind), items.length);
+      const m = new THREE.Matrix4();
+      items.forEach(({ p, slot }, i) => {
+        m.compose(p.pos, p.quat, new THREE.Vector3(p.scale, p.scale, p.scale));
+        mesh.setMatrixAt(i, m);
+        const jitter = Math.sin(p.pos.x * 0.7) * Math.cos(p.pos.z * 0.6);
+        let [ca, cb] = sidePalette(b.thetaOf(p.pos.x, p.pos.z), jitter);
+        // Korallen/Fächer: kräftiges Magenta/Orange/Cyan, unabhängig vom Sektor etwas variieren
+        if ((kind === 'coral' || kind === 'fan') && ((p.pos.x * 3.1 + p.pos.z) % 3 + 3) % 3 < 1) [ca, cb] = [new THREE.Color('#ff8a3d'), new THREE.Color('#ff2fb3')];
+        if (debugGround() && groundError(b, p.pos, p.foot) > 0.03) [ca, cb] = [new THREE.Color(6, 0, 0), new THREE.Color(6, 0, 0)];
+        attrs.colA.set([ca.r, ca.g, ca.b], i * 3);
+        attrs.colB.set([cb.r, cb.g, cb.b], i * 3);
+        attrs.phase[i] = (Math.abs(Math.sin(p.pos.x * 12.9 + p.pos.z * 78.2)) * 43758.5) % 1;
+        attrs.lod.set([slot.fade, slot.role], i * 2);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.name = `flora-${kind}-${lod}`;
+      group.add(mesh);
+    });
+  }
+
+  // Hängende Leuchtfäden von den Riesenpilzhüten
+  const capsForStrands = giants.slice(0, profile.hangingCaps).map((g) => ({
+    pos: g.p.pos.clone().add(new THREE.Vector3(0, 0.86 * g.p.scale, 0).applyQuaternion(g.p.quat)),
+    radius: SPECIES[g.species].capR * g.p.scale,
+  }));
+  const strands = hangingStrands(capsForStrands, rng);
+  if (strands) group.add(strands);
 
   // --- Farne und Sporenkapseln am Hang ---
   const scatter = (kind: string, geo: THREE.BufferGeometry, mat: THREE.Material, pts: Placement[], colors: THREE.Color[]) => {
@@ -373,7 +503,7 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
       const c = debugGround() && groundError(b, p.pos, p.foot) > 0.03 ? new THREE.Color(6, 0, 0) : colors[Math.floor(rng() * colors.length)];
       col.set([c.r, c.g, c.b], i * 3);
       ph[i] = rng();
-      record(kind, p);
+      record(kind, p, p.scale);
     });
     geo.setAttribute('aColor', new THREE.InstancedBufferAttribute(col, 3));
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(ph, 1));
@@ -397,7 +527,6 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
     const c = poly[(i + 1) % poly.length];
     const len = Math.hypot(c.x - a.x, c.z - a.z);
     const n = Math.max(1, Math.round(len * profile.saumPerMeter));
-    // Außennormale der Kante (Polygonorientierung egal: Seite außerhalb wählen)
     let nx = (c.z - a.z) / (len || 1);
     let nz = -(c.x - a.x) / (len || 1);
     const mid = { x: (a.x + c.x) / 2 + nx * 0.05, z: (a.z + c.z) / 2 + nz * 0.05 };
@@ -407,10 +536,10 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
     }
     for (let k = 0; k < n; k++) {
       const t = (k + rng()) / n;
-      const out = 0.08 + rng() * 0.3; // 8–38 cm außerhalb
+      const out = 0.08 + rng() * 0.3;
       const x = a.x + (c.x - a.x) * t + nx * out;
       const z = a.z + (c.z - a.z) * t + nz * out;
-      const s = 0.03 + rng() * 0.035; // 3–6,5 cm (unter Knöchelhöhe)
+      const s = 0.03 + rng() * 0.035;
       if (pointInPolygon({ x, z }, poly) || distanceToPolygonEdge({ x, z }, poly) < s + 0.03) continue;
       saumPts.push(groundPlace(b, rng, x, z, s, s, { align: 'normal' }));
     }
@@ -419,16 +548,20 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
 
   const vines = createVines(b, profile.vines, rng);
   if (vines) group.add(vines);
-  const myc = createMycelium(b, near.filter((x) => x.p.scale > 0.45).slice(0, profile.mycelium), rng);
+  const myc = createMycelium(b, all.filter((x) => x.p.scale > 0.45 && x.fixedLod === undefined).slice(0, profile.mycelium), rng);
   if (myc) group.add(myc);
 
-  // Zirp-Quellen: bodennah in der Vegetation am Hang
-  const chirpSpots = near
-    .filter((x) => x.p.scale < 1.5)
-    .slice(0, 40)
-    .map((x) => x.p.pos.clone().add(new THREE.Vector3(0, 0.1, 0)));
+  // Klangquellen (für die Geräuschkulisse)
+  const chirpSpots = all.filter((x) => x.p.scale < 1.5).slice(0, 40).map((x) => x.p.pos.clone().add(new THREE.Vector3(0, 0.1, 0)));
+  const soundSpots = {
+    bubbles: floraInst.bubble.slice(0, 24).map((p) => p.pos.clone().add(new THREE.Vector3(0, 0.6 * p.scale, 0))),
+    vines: floraInst.tentacle.slice(0, 24).map((p) => p.pos.clone().add(new THREE.Vector3(0, 0.4 * p.scale, 0))),
+    giants: giants.map((g) => g.p.pos.clone().add(new THREE.Vector3(0, 0.86 * g.p.scale, 0).applyQuaternion(g.p.quat))),
+    drips: capsForStrands.map((c) => c.pos.clone().add(new THREE.Vector3(0, -0.2, 0))),
+    leaves: floraInst.leaf.slice(0, 24).map((p) => p.pos.clone().add(new THREE.Vector3(0, 1.0 * p.scale, 0))),
+  };
 
-  return { group, attractors, chirpSpots, grounded };
+  return { group, attractors, chirpSpots, soundSpots, grounded };
 }
 
 /** Leuchtende Ranken vom Rand den Hang hinunter, dem Gelände folgend. */

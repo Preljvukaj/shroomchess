@@ -15,6 +15,7 @@ import { BoardScene } from './render/boardScene';
 import { InteractionController } from './render/interaction';
 import { PLAYER_GLOW, setPieceContrast } from './render/pieces';
 import { SceneContext } from './render/scene';
+import { worldUniforms } from './render/shared';
 import { createWorld, squareRegion } from './render/world';
 import { squarePolygon } from './render/world/basin';
 import type { V2 } from './xr/math/vec2';
@@ -97,8 +98,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
   let clock = new ChessClock(isLichess ? { initial: 1, increment: 0 } : tc);
   const engine = isEngine ? new StockfishEngine() : null;
   const audio = new AudioEngine();
-  audio.setVolume(settings.get().volume);
-  audio.setCreatures(settings.get().creaturesVolume, settings.get().insects);
+  audio.setSoundSpots(world.soundSpots);
 
   const controls = new DesktopControls(ctx.camera, ctx.renderer.domElement, side, flatHalf);
   let viewSide: Color = isEngine ? human : 'w';
@@ -109,6 +109,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     pieceTop: board.kingHeight * 1.15,
   });
   ctx.scene.add(insects.root);
+  // (Greif-Säulen-Fäden werden nach dem Interaction-Controller hinzugefügt)
 
   /**
    * Welt (Senke, Vegetation) und Insekten für eine neue Spielfläche neu bauen und das Brett
@@ -132,6 +133,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
       pose: { x: pose.x, z: pose.z, yaw: pose.yaw, baseY: pose.height },
     });
     ctx.scene.add(insects.root);
+    audio.setSoundSpots(world.soundSpots);
     applySettings();
   }
 
@@ -151,6 +153,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     onPickup: () => audio.play('pickup'),
     onHeldOverSquare: (sq) => board.coords.highlightSquare(sq),
   });
+  ctx.scene.add(interaction.beams);
 
   // ---------- Overlay ----------
   let analysisOn = false;
@@ -270,8 +273,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     board.markNoLegalMoves = s.markNoLegalMoves;
     board.coords.apply(s, viewSide);
     setPieceContrast(s.pieceContrast, s.whiteOutline);
-    audio.setVolume(s.volume);
-    audio.setCreatures(s.creaturesVolume, s.insects);
+    audio.setMix({ master: s.volume, sfx: s.sfxVolume, ambience: s.ambienceVolume, creatures: s.creaturesVolume, insects: s.insects });
     insects.setEnabled(s.insects, s.insectLanding);
   }
   settings.on('change', applySettings);
@@ -421,6 +423,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     ctx.camera.getWorldDirection(fwd);
     up.set(0, 1, 0).applyQuaternion(ctx.camera.getWorldQuaternion(new THREE.Quaternion()));
     audio.setListener(head, fwd, up);
+    worldUniforms.uWind.value = audio.windLevel(); // Böen → Vegetation wiegt synchron stärker
     insects.update(dt, time, head, fwd, vr?.active ? vr.handPoints() : []);
     uiTimer += dt;
     if (uiTimer > 0.1) {

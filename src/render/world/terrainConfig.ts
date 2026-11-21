@@ -12,7 +12,7 @@ export const terrain = {
   /** Höchste erlaubte Hangsteigung in Grad (inkl. Unebenheiten bleibt sie unter 25°). */
   maxSlopeDeg: 21,
   /** Breite des weichen Übergangs von der Moos-Lichtung zum Waldboden in m. */
-  clearingFade: 0.3,
+  clearingFade: 0.4,
   minHeight: 1.2,
   maxHeight: 1.8,
 };

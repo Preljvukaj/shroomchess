@@ -5,11 +5,12 @@ import type { AppliedMove, Color, PieceSymbol, Square } from '../core/types';
 import { BoardView, squareCenter } from './board';
 import { Coordinates } from './coordinates';
 import { GripBatch } from './gripBatch';
+import { PieceBatch } from './pieceBatch';
 import { CaptureBowl } from './captureBowl';
 import { Effects } from './effects';
 import { Highlights } from './highlights';
 import { PieceView } from './pieceView';
-import { KING_HEIGHT_PER_SQUARE, PLAYER_GLOW, applyRim } from './pieces';
+import { KING_HEIGHT_PER_SQUARE, PLAYER_GLOW } from './pieces';
 import { PromotionPicker } from './promotion';
 
 export interface BoardSceneOptions {
@@ -32,6 +33,7 @@ export class BoardScene {
   readonly bowls: Record<Color, CaptureBowl>;
   readonly coords: Coordinates;
   readonly grips = new GripBatch();
+  readonly pieceBatch: PieceBatch;
   readonly squareSize: number;
   readonly kingHeight: number;
   private pieces = new Map<Square, PieceView>();
@@ -53,7 +55,8 @@ export class BoardScene {
     this.promotion = new PromotionPicker(this.kingHeight, opts.segments, opts.high);
     this.piecesRoot.position.y = this.board.surfaceY;
     this.coords = new Coordinates(opts.squareSize, this.board.surfaceY);
-    this.root.add(this.board.root, this.highlights.mesh, this.coords.root, this.piecesRoot, this.promotion.root, this.grips.root);
+    this.pieceBatch = new PieceBatch(opts.segments, opts.high);
+    this.root.add(this.board.root, this.highlights.mesh, this.coords.root, this.piecesRoot, this.promotion.root, this.grips.root, this.pieceBatch.root);
 
     // Schalen: rechts neben dem jeweiligen Spieler (Weiß steht bei +Z und schaut nach −Z → rechts = +X)
     const s = opts.squareSize;
@@ -177,6 +180,7 @@ export class BoardScene {
         if (victim && victim !== mover) {
           this.pieces.delete(m.capturedSquare);
           const where = victim.mesh.getWorldPosition(new THREE.Vector3());
+          victim.mesh.visible = true; // nicht mehr im Bündel → für den Auflöse-Effekt selbst zeichnen
           void this.effects.dissolve(victim.mesh, PLAYER_GLOW[victim.color], this.kingHeight).then(() => victim.dispose());
           this.bowls[m.color].add(m.captured, victim.color, where.setY(where.y + this.kingHeight * 0.4), this.effects);
         }
@@ -206,15 +210,11 @@ export class BoardScene {
           await this.effects.moveArc(rook.root, squareCenter(m.rookMove.to, this.squareSize), 0.45, this.kingHeight * 0.3);
         }
       }
-      // 4. Umwandlung: Geometrie tauschen mit Aufleuchten
+      // 4. Umwandlung: Geometrie tauschen (Bündel wechselt automatisch), mit Aufleuchten des Griffpunkts
       if (m.promotion && mover) {
         mover.setType(m.promotion, this.opts.segments);
-        const mat = (mover.mesh.material as THREE.MeshPhysicalMaterial).clone();
-        applyRim(mat, mover.color); // Klonen übernimmt den Shader-Hook nicht
-        mover.mesh.material = mat;
-        const e0 = mat.emissive.clone();
-        const glow = PLAYER_GLOW[mover.color];
-        await this.effects.tweenAsync(0.8, (k) => mat.emissive.copy(e0).lerp(glow, Math.sin(k * Math.PI)));
+        mover.flash = 1;
+        await this.effects.tweenAsync(0.4, () => undefined);
       }
     } finally {
       this.animating--;
@@ -235,5 +235,8 @@ export class BoardScene {
     this.promotion.update(time);
     for (const p of this.pieces.values()) p.update(time, this.colorblind);
     this.grips.update(this.allPieces());
+    this.pieceBatch.update(this.allPieces());
+    this.bowls.w.update();
+    this.bowls.b.update();
   }
 }

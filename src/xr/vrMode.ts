@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Quality } from '../core/settings';
 import { settings } from '../core/settings';
 import type { Color } from '../core/types';
-import type { InteractionController } from '../render/interaction';
+import type { InteractionController, Pointer } from '../render/interaction';
 import { PLAYER_GLOW } from '../render/pieces';
 import { BoundaryWarning, WARN_DISTANCE, distanceToBoundary } from './boundaryWarning';
 import { type BoardPlacement, orderPolygon, palmFacesHead, placeBoard } from './math/placement';
@@ -327,6 +327,7 @@ export class VRMode {
     { id: 'smaller', key: 'mSmaller' },
     { id: 'bigger', key: 'mBigger' },
     { id: 'insects', key: 'mInsects' },
+    { id: 'grabray', key: 'mGrabRay' },
     { id: 'coords', key: 'mCoords' },
     { id: 'rematch', key: 'mRematch' },
     { id: 'new', key: 'mNew' },
@@ -415,6 +416,10 @@ export class VRMode {
       case 'insects':
         settings.set({ insects: !settings.get().insects });
         return;
+      case 'grabray':
+        settings.set({ grabRay: !settings.get().grabRay });
+        this.say(V(settings.get().grabRay ? 'grabRayOn' : 'grabRayOff'), 3);
+        return;
       case 'coords': {
         const order = ['S', 'M', 'L'] as const;
         settings.set({ coordSize: order[(order.indexOf(settings.get().coordSize) + 1) % 3] });
@@ -449,7 +454,26 @@ export class VRMode {
     } else if (this.phase === 'playing') {
       this.updateMenu(pointers, consumed, dt);
       // Brett-Interaktion mit allen Zeigern, die gerade keinen Knopf berühren
-      this.host.interaction.update(pointers.filter((p) => !consumed.has(p.id)));
+      const free = pointers.filter((p) => !consumed.has(p.id));
+      const all: Pointer[] = [...free];
+      // Optionaler Greifstrahl: zusätzlicher Strahl-Zeiger nach vorne-unten – pausiert, solange die Hand
+      // selbst eine Figur markiert/hält (sonst würden zwei Figuren gleichzeitig gegriffen)
+      if (settings.get().grabRay) {
+        for (const p of free) {
+          const rid = `${p.id}-ray`;
+          if (this.host.interaction.hasTarget(p.id) && !this.host.interaction.hasTarget(rid)) {
+            this.rayBeam(rid, null);
+            continue;
+          }
+          const dir = p.rayDir.clone();
+          dir.y -= 0.35;
+          dir.normalize();
+          const ray = new THREE.Ray(p.rayOrigin.clone(), dir);
+          all.push({ id: rid, ray, pressed: p.pressed, haptic: p.haptic });
+          this.rayBeam(rid, ray);
+        }
+      } else for (const id of this.rayBeams.keys()) this.rayBeam(id, null);
+      this.host.interaction.update(all);
       this.updateClock();
       // Grenzwarnung (Kopf + Hände) und kurzer Text, wenn der Kopf sehr nah ist
       if (this.warning) {
@@ -461,6 +485,28 @@ export class VRMode {
     }
     this.updateNotice();
     for (const p of pointers) this.lastPressed.set(p.id, p.pressed);
+  }
+
+  private rayBeams = new Map<string, THREE.Mesh>();
+
+  /** Sichtbarer Greifstrahl (bis zum Boden bzw. 4 m). */
+  private rayBeam(id: string, ray: THREE.Ray | null): void {
+    let m = this.rayBeams.get(id);
+    if (!ray) {
+      if (m) m.visible = false;
+      return;
+    }
+    if (!m) {
+      const g = new THREE.CylinderGeometry(0.002, 0.002, 1, 5, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2); // entlang +Z
+      m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: '#9ffcff', transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }));
+      this.rayBeams.set(id, m);
+      this.uiRoot.add(m);
+    }
+    const len = ray.direction.y < -0.01 ? Math.min(4, -ray.origin.y / ray.direction.y) : 4;
+    m.position.copy(ray.origin);
+    m.lookAt(ray.origin.clone().add(ray.direction)); // Object3D.lookAt richtet +Z zum Ziel aus
+    m.scale.set(1, 1, len);
+    m.visible = true;
   }
 
   /** Blickrichtung relativ zum Brett (für die Ausrichtung der Umwandlungsauswahl). */

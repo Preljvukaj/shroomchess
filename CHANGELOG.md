@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 – Greif-Säule, ruhige Kontur, Erde & Moos, Alien-Flora, dichte Geräuschkulisse
+
+- **Greifen ohne Bücken:** Hand irgendwo über der eigenen Figur (bis 2 m Höhe) → greifbar, mit Sporenfaden zur Figur. Greifen lässt sie in
+  150 ms in die Hand fliegen, Ablegen zählt das Feld unter der Hand. Optional gibt es den **Greifstrahl** für Sitzmodus bzw. eingeschränkte Beweglichkeit (Einstellung).
+- **Kontur ruhig:** MSAA immer an (auch auf der Quest), Kantenbreite mindestens ~1,5 px, weicher Fresnel auf Distanz, weniger scharfe Glanzlichter.
+- **Bodenfarben:** Lichtung aus warm-brauner Erde (Humus, Nadeln, Blättchen, Steinchen), Umgebung in vielen Grüntönen, Moos wächst
+  unregelmäßig in die Erde.
+- **Alien-Flora:** Blasenpflanzen, Tentakel, Fächer, Korallen, Riesenblätter, Sporenkapsel-Pflanzen, Bodenbüschel, Etagen-, Spiral- und
+  Gallertpilze, hängende Leuchtfäden. Jede Senkenseite hat ihren eigenen Farbschwerpunkt, dazu Wiegen, Pulsieren und Winden. 3 LOD-Stufen mit gedithertem Crossfade.
+- **Geräuschkulisse:** viel mehr Insekten-Vorbeiflüge (0,5–3 s, bis 8 gleichzeitig) mit Doppler, 22 Insektenklänge, dazu Pflanzen-Blubbern,
+  Rascheln, Tropfen, Pilz-Summen, Windböen und ferne Alien-Rufe. Neue getrennte Regler: **Spiel-Sounds**, **Umgebung**, **Tiere / Insekten**.
+- **Performance:** Figuren und Schalen-Minis gebündelt (bis zu 20 Draw Calls gespart).
+- **Tests:** 100 (vorher 87). Neu: Greif-Säule (Höhen, Nachbarfeld, Hysterese), Ablegen nach horizontaler Position, Fuß nie unter 0,
+  neue Pflanzen auf dem Boden, nichts über Knöchelhöhe am Rand der Spielfläche, LOD-Überblendung, Vorbeiflug-Bahn und -Intervalle, Doppler, Stimmen-Priorität.
+
+
 ## 0.4.0 – Senke, Greifen, Kontrast, Klang, Fern-Pilze, Lichtung
 
 - **Senke flacher und weicher:** Wall 1,2–1,8 m (vorher bis 4 m), Hangfuß ~1 m nach der Spielfläche, weiches Profil ohne Knick,

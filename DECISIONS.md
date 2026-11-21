@@ -279,3 +279,75 @@ Bed und Einzelgeräusche laufen über den Insekten-Bus. „Insekten aus“ schal
 **D45 – Performance nach Runde 3 (Headless-Browser, Draw Calls/Dreiecke):** Low 84 / 181k, Medium 84 / 400k, High (Desktop)
 98 / 1,05 Mio. Alles liegt im Quest-Budget, es war keine Reduzierung nötig. Die FPS auf der Quest sind weiterhin nicht gemessen. Reihenfolge für Kürzungen: Fern-Pilze
 (`vfarShrooms`, `farShrooms`) → Insekten → Bloom.
+
+## Änderungsrunde 4 (Greif-Säule, Flimmern, Bodenfarben, Alien-Flora, Klangebenen)
+
+**D46 – Greif-Säule (`src/render/grab.ts`, `columnConfig`).** Über jeder Figur steht eine unsichtbare senkrechte Säule:
+- Radius 38 % der Feldbreite, Austritt bei +20 %, also 45,6 %. Damit überschneiden sich benachbarte Säulen auch mit Hysterese nie.
+- Höhe vom Griffpunkt (−5 cm) bis 2,0 m.
+- Das Nah-Greifen hat Vorrang, die Säule ist eine Erweiterung. Es gewinnt der kleinste horizontale Abstand.
+- Markierung mit Sporenfaden von der Hand senkrecht zum Griffpunkt, Snap 150 ms ease-out. Beim Tragen ist der Fuß nie unter der Brettoberfläche.
+- Ablegen: Es zählt das Feld unter der Hand (horizontal), danach gleitet die Figur in 180 ms aufs Feld.
+- Gegnerische Figuren zeigen in der Säule nur die gedämpfte Markierung.
+
+Im Emulator geprüft: greifbar in 1,5 m und 1,95 m, nicht in 2,1 m, Nachbarfeld korrekt.
+
+**D47 – Optionaler Greifstrahl (Einstellung `grabRay`, Standard aus).** Ein zusätzlicher Strahl-Zeiger aus dem Zielstrahl von Controller
+bzw. Hand, nach unten geneigt. Er nutzt die erprobte Strahl-Logik des Desktops (Treffer auf Figur/Griffpunkt, Tragen über die Brettebene).
+Er pausiert, solange die Hand selbst eine Figur markiert oder hält, sonst würden zwei Figuren gleichzeitig gegriffen.
+
+**D48 – Flimmern der Kontur.** Die Kontur ist ein Rim-Light im Material (D43), deshalb greifen die Hull-spezifischen Punkte nicht.
+Behoben wurden die tatsächlichen Ursachen:
+1. **MSAA war auf der Quest aus** (Qualität Low hatte `antialias: false`). Jetzt ist es immer an. Der XR-Framebuffer übernimmt das
+   (4× MSAA, auf Tile-GPUs fast kostenlos).
+2. **Fresnel-Band dünner als ein Pixel:** Die Kantenbreite wird per `fwidth` begrenzt, der Übergang ist also nie schmaler als ~1,5 px.
+3. **Distanz-Fade:** Ab 4–9 m geht die scharfe Kante in einen weichen, stabilen Fresnel-Term über.
+4. **Specular-Aliasing:** Die Obsidian-Glanzlichter waren sehr scharf (Rauheit 0,12/0,05), jetzt 0,2/0,14.
+5. Der farbige Hervorhebungs-Umriss bekommt Polygon-Offset gegen Z-Fighting.
+
+Die Normalen sind seit M1 per `mergeVertices` gemittelt. Bloom ist in XR aus, und die Konturhelligkeit liegt unter der Bloom-Schwelle.
+**Nicht verifiziert:** Ob es auf der Quest bei Kopfbewegung ganz ruhig ist, lässt sich nur auf der Brille beurteilen. Der Emulator rendert ohne MSAA.
+
+**D49 – Bodenfarben als prozedurale Splatmap statt KTX2-Texturen.** KTX2-Dateien kann ich in dieser Umgebung nicht erzeugen (`toktx` fehlt).
+Die Erd- und Moos-Maske wird im Shader berechnet:
+- **Lichtung:** Erde #5A3E2B–#6B4A33 ±10 %, Humus, Nadeln, Blättchen, Steinchen, dezente warm-türkise Sporen und Myzelfäden.
+- **Umgebung:** Grüntöne von Smaragd über Moos- bis Türkisgrün, grasartige Struktur, Polster.
+- **Übergang:** 0,4 m außen plus 0,4 m innen. Moos wächst per Noise-Maske in die Erde, und es gibt vereinzelte Polster tiefer innen.
+
+Vorteile: kein Download, kein Texturspeicher, kein Kachelmuster. Für die Nacht ist die Erde um ~40 % gedämpft. Das Brett (Mondstein/Basalt,
+grüner Moosrahmen) bleibt klar abgesetzt (Screenshot geprüft).
+
+**D50 – Alien-Flora (`src/render/world/flora.ts`).** Eigenständige, prozedurale Formen. Es werden keine Designs aus den genannten Werken nachgebaut,
+nur Stimmung und Farbgefühl sind übernommen:
+- Blasenpflanzen, gerippte Tentakel, gewellte Fächer, verzweigte Korallen, gezackte Riesenblätter mit Leuchtadern
+- Sporenkapsel-Pflanzen, Bodendetail-Büschel (Alien-Gras, Moosbälle, Mini-Pilze bzw. Flechtensteine, Sporenpfütze, Kiesel)
+- 3 neue Riesenpilz-Arten: Etagenpilz (gestapelte Hüte), Spiralpilz, Gallertpilz
+- Hängende Leuchtfäden an Riesenpilzen
+- Bewegung im Vertex-Shader (Wiegen, Winden, Atmen/Pulsieren, Schweben), mit Phase je Instanz. Windböen verstärken sie synchron zum Klang.
+- Durchscheinendes (Blasen, Gallerthüte) wird gedithert statt echt transparent, also ohne Sortieren und ohne Overdraw-Kosten.
+- Jede Senkenseite hat einen eigenen Farbschwerpunkt zur Orientierung (Türkis/Violett, Magenta/Orange, Cyan/Giftgrün, Violett/Rosa).
+- Dichte steigt nach außen: im Streifen vor dem Hangfuß nur Büschel ≤ 30 cm, auf dem Hang mittelhoch, Riesen und dichteste Vegetation am Rand und dahinter.
+- Alles steht über die Höhenfunktion auf dem Boden (Test: 3 cm).
+
+**D51 – 3 LOD-Stufen mit gedithertem Crossfade, aber ohne Laufzeit-Umsortierung.** Jede Art hat 3 Geometrie-Stufen.
+Die Stufe hängt an der Zone (Abstand zur Spielfläche). Nur Objekte im ±1-m-Band um eine Zonengrenze liegen in beiden Stufen und werden
+abhängig vom Kameraabstand komplementär gedithert (Bayer 4×4). Es entsteht weder ein Loch noch eine Doppelung, und beim Gehen „ploppt“ nichts.
+Alle anderen Objekte kosten nichts extra. Kleine Bodendetails haben nur die nahe Stufe. Einige neue Arten nutzen nur zwei Stufen, um Draw Calls zu sparen.
+
+**D52 – Draw-Call-Budget trotz vieler neuer Arten:**
+- **Figuren gebündelt:** 32 → höchstens 12 InstancedMeshes (je Typ × Farbe). Die einzelnen Meshes bleiben als unsichtbare Stellvertreter
+  für Raycasts, Umriss und Auflöse-Effekt.
+- Die **Mini-Figuren in den Pilzschalen** sind ebenfalls gebündelt, vorher hätte jede geschlagene Figur einen Draw Call gekostet.
+
+Messung (Headless-Browser): Low 83 Calls / 270k Dreiecke. Medium 86 / 502k, das liegt an der Grenze; dafür wurden wie vorgegeben zuerst Fern-Pilze, ferne Flora
+und Farne reduziert. High (Desktop) 100 / 1,5 Mio. Die FPS auf der Quest sind nicht gemessen.
+
+**D53 – Klangebenen und Mix (`src/audio/audio.ts`, `mix.ts`, `insectSounds.ts`):**
+- **Busse:** „Spiel-Sounds“, „Umgebung“ und „Tiere / Insekten“ sind getrennt regelbar, „Insekten aus“ bleibt. Ducking −35 % bei Spielsounds.
+- **Vorbeiflüge:** alle 0,5–3 s, bis 8 gleichzeitig, auf einer Bahn von Seite zu Seite in 0,8–1,4 m am Kopf vorbei. Es ist eine reine
+  Hörbahn, die sichtbaren Insekten halten weiter ≥ 0,6 m Abstand. Lautstärke steigt und fällt mit dem Abstand, leichter Doppler über eine Detune-Kurve.
+  Die Bahn beginnt dort, wo gerade ein echtes Insekt fliegt.
+- **Rezepte:** 22 Insektenklänge sowie Pflanzen (Blubbern, Ploppen, Rascheln, Knistern, Sporen-Puff), Tropfen und vier melodisch-komische Fernrufe.
+- **Weitere Ebenen:** Pilz-Summen über 3 feste Stimmen an den nächsten Riesenpilzen, Windböen mit Blätterrauschen (synchron zum Wiegen der Vegetation),
+  kurze Stille vor fernen Rufen, Dichte schwankt über Minuten.
+- **Stimmen:** Pool aus 12 HRTF-Pannern, Vergabe mit Priorität (nahe Klänge verdrängen ferne).

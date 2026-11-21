@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLSL_FOG, GLSL_NOISE, mulberry32, safeMerge, worldUniforms } from '../shared';
+import { GLSL_LOD_DITHER } from './flora';
 
 /**
  * Prozedurale Pilzarten (Seed-basiert). Pro Art eine zusammengeführte Geometrie
@@ -11,7 +12,7 @@ import { GLSL_FOG, GLSL_NOISE, mulberry32, safeMerge, worldUniforms } from '../s
  */
 
 export type CapShape = 'hemi' | 'flat' | 'bell' | 'funnel' | 'umbo' | 'cone';
-export type StemShape = 'straight' | 'bent' | 's' | 'bulb' | 'taper';
+export type StemShape = 'straight' | 'bent' | 's' | 'bulb' | 'taper' | 'spiral';
 export type Rim = 'smooth' | 'wavy' | 'torn';
 
 export interface SpeciesDef {
@@ -34,6 +35,10 @@ export interface SpeciesDef {
   patternColor: string;
   stemColor: string;
   glow: number;
+  /** Mehrere Hüte übereinander am selben Stiel */
+  tiers?: number;
+  /** Durchscheinender, gallertartiger Hut (gedithert statt echter Transparenz) */
+  jelly?: boolean;
 }
 
 
@@ -45,6 +50,9 @@ export const SPECIES: SpeciesDef[] = [
   { id: 'knollenpilz', cap: 'hemi', capR: 0.3, capH: 0.24, rim: 'smooth', stem: 'bulb', stemR: 0.045, annulus: true, stemTex: 1, pattern: 0, cluster: 1, gillA: '#8b3dff', gillB: '#ff2fb3', capColor: '#1c0f2e', patternColor: '#d6a8ff', stemColor: '#2a2038', glow: 1.0 },
   { id: 'buschel', cap: 'bell', capR: 0.16, capH: 0.12, rim: 'wavy', stem: 'bent', stemR: 0.022, annulus: false, stemTex: 0, pattern: 2, cluster: 4, gillA: '#2fd8ff', gillB: '#9dff3a', capColor: '#10202a', patternColor: '#9dfff0', stemColor: '#20303a', glow: 1.1 },
   { id: 'riesenschirm', cap: 'flat', capR: 0.5, capH: 0.13, rim: 'torn', stem: 'straight', stemR: 0.055, annulus: true, stemTex: 0, pattern: 1, cluster: 1, gillA: '#1de9c9', gillB: '#8b3dff', capColor: '#160f28', patternColor: '#6af0ff', stemColor: '#2a2440', glow: 1.0 },
+  { id: 'etagenpilz', cap: 'flat', capR: 0.3, capH: 0.1, rim: 'wavy', stem: 'straight', stemR: 0.04, annulus: false, stemTex: 0, pattern: 2, cluster: 1, tiers: 3, gillA: '#ff8a3d', gillB: '#ff2fb3', capColor: '#2a1410', patternColor: '#ffb36b', stemColor: '#2c1e1a', glow: 1.05 },
+  { id: 'spiralpilz', cap: 'cone', capR: 0.22, capH: 0.2, rim: 'smooth', stem: 'spiral', stemR: 0.035, annulus: false, stemTex: 2, pattern: 0, cluster: 1, gillA: '#9dff3a', gillB: '#1de9c9', capColor: '#10261a', patternColor: '#c4ff7a', stemColor: '#1c2a20', glow: 1.0 },
+  { id: 'gallertpilz', cap: 'hemi', capR: 0.34, capH: 0.26, rim: 'wavy', stem: 'bulb', stemR: 0.05, annulus: false, stemTex: 1, pattern: 2, cluster: 1, jelly: true, gillA: '#2fd8ff', gillB: '#ff4fd8', capColor: '#1a2a40', patternColor: '#9ffcff', stemColor: '#22283a', glow: 1.1 },
   { id: 'zunderling', cap: 'cone', capR: 0.24, capH: 0.2, rim: 'torn', stem: 'taper', stemR: 0.04, annulus: false, stemTex: 2, pattern: 3, cluster: 1, gillA: '#ff2fb3', gillB: '#2fd8ff', capColor: '#22101e', patternColor: '#ff9ad8', stemColor: '#2b1f2a', glow: 0.95 },
 ];
 
@@ -205,7 +213,7 @@ function buildGills(sp: SpeciesDef, d: Detail, top: THREE.Vector3, rimR: (a: num
 }
 
 /** Stiel als Röhre entlang einer Bezier-Kurve mit Radiusprofil, Fasern und Ausbuchtungen. */
-function buildStem(sp: SpeciesDef, d: Detail, rng: () => number, height: number, lean: THREE.Vector3): { geo: THREE.BufferGeometry; top: THREE.Vector3; topR: number } {
+function buildStem(sp: SpeciesDef, d: Detail, rng: () => number, height: number, lean: THREE.Vector3): { geo: THREE.BufferGeometry; top: THREE.Vector3; topR: number; curve: THREE.Curve<THREE.Vector3> } {
   const Y = height;
   const end = new THREE.Vector3(lean.x, Y, lean.z);
   let c1: THREE.Vector3;
@@ -216,6 +224,7 @@ function buildStem(sp: SpeciesDef, d: Detail, rng: () => number, height: number,
       c2 = new THREE.Vector3(lean.x * 0.4 + 0.06, Y * 0.8, lean.z * 0.4);
       break;
     case 's':
+    case 'spiral':
       c1 = new THREE.Vector3(0.11, Y * 0.33, 0.02);
       c2 = new THREE.Vector3(-0.11, Y * 0.66, -0.02);
       break;
@@ -223,7 +232,15 @@ function buildStem(sp: SpeciesDef, d: Detail, rng: () => number, height: number,
       c1 = new THREE.Vector3(lean.x * 0.33, Y * 0.33, lean.z * 0.33);
       c2 = new THREE.Vector3(lean.x * 0.66, Y * 0.66, lean.z * 0.66);
   }
-  const curve = new THREE.CubicBezierCurve3(new THREE.Vector3(0, 0, 0), c1, c2, end);
+  // Spiralstiel: Schraubenlinie, die sich nach oben eng windet
+  const curve: THREE.Curve<THREE.Vector3> = sp.stem === 'spiral'
+    ? new THREE.CatmullRomCurve3(Array.from({ length: 10 }, (_, k) => {
+        const t = k / 9;
+        const rr = 0.07 * (1 - t * 0.6);
+        const a = t * Math.PI * 4.5;
+        return new THREE.Vector3(Math.cos(a) * rr + end.x * t, t * Y, Math.sin(a) * rr + end.z * t);
+      }))
+    : new THREE.CubicBezierCurve3(new THREE.Vector3(0, 0, 0), c1, c2, end);
   const T = d.stemRings;
   const S = d.stemRad;
   const frames = curve.computeFrenetFrames(T, false);
@@ -285,7 +302,7 @@ function buildStem(sp: SpeciesDef, d: Detail, rng: () => number, height: number,
     }
     parts.push(toGeometry(ring));
   }
-  return { geo: parts.length > 1 ? safeMerge(parts) : geo, top: end, topR: radius(1, 0) * 0.75 };
+  return { geo: parts.length > 1 ? safeMerge(parts) : geo, top: curve.getPointAt(1), topR: radius(1, 0) * 0.75, curve };
 }
 
 function buildOne(sp: SpeciesDef, d: Detail, rng: () => number, height: number, lean: THREE.Vector3, capScale: number): THREE.BufferGeometry {
@@ -293,6 +310,14 @@ function buildOne(sp: SpeciesDef, d: Detail, rng: () => number, height: number, 
   const cap = buildCap(sp, d, stem.top, rng, capScale);
   const parts = [stem.geo, cap.geo];
   if (!d.far && d.gills > 0) parts.push(buildGills(sp, d, stem.top, cap.rimR, stem.topR, capScale));
+  // Gestapelte Hüte: weitere, nach unten größere Hüte am selben Stiel
+  for (let k = 1; k < (sp.tiers ?? 1); k++) {
+    const at = stem.curve.getPointAt(1 - k * 0.24);
+    const sc = capScale * (1 + 0.28 * k);
+    const c2 = buildCap(sp, d, at, rng, sc);
+    parts.push(c2.geo);
+    if (!d.far && d.gills > 0) parts.push(buildGills(sp, d, at, c2.rimR, stem.topR * 1.2, sc));
+  }
   return safeMerge(parts);
 }
 
@@ -324,33 +349,39 @@ export function speciesMaterial(sp: SpeciesDef, sway: number): THREE.ShaderMater
       uPattern: { value: sp.pattern },
       uStemTex: { value: sp.stemTex },
       uGlow: { value: sp.glow },
+      uJelly: { value: sp.jelly ? 1 : 0 },
     },
     vertexShader: /* glsl */ `
       attribute float aPart; attribute float aRad;
-      attribute vec3 aTint; attribute float aPhase; attribute float aSeed;
-      uniform float uTime;
+      attribute vec3 aTint; attribute float aPhase; attribute float aSeed; attribute vec2 aLod;
+      uniform float uTime; uniform float uWind;
       varying float vPart; varying float vRad; varying vec3 vLocal; varying vec3 vNormal; varying float vDist;
-      varying vec3 vTint; varying float vPhase; varying float vSeed;
+      varying vec3 vTint; varying float vPhase; varying float vSeed; varying vec2 vLod; varying float vCamDist; varying vec3 vView;
       void main(){
         vec3 p = position;
-        float sway = ${sway.toFixed(4)} * p.y * p.y;
+        float sway = ${sway.toFixed(4)} * p.y * p.y * (1.0 + 2.0 * uWind);
         p.x += sin(uTime * 0.7 + aPhase * 6.283) * sway;
         p.z += cos(uTime * 0.53 + aPhase * 4.0) * sway * 0.7;
         vLocal = position; vPart = aPart; vRad = aRad; vTint = aTint; vPhase = aPhase; vSeed = aSeed;
         vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.0);
         vNormal = normalize(mat3(modelMatrix * instanceMatrix) * normal);
+        vCamDist = distance(cameraPosition, (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz);
+        vView = normalize(cameraPosition - w.xyz);
+        vLod = aLod;
         vec4 mv = viewMatrix * w; vDist = length(mv.xyz);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */ `
       uniform float uTime; uniform vec3 uTint; uniform float uTintAmt;
       uniform vec3 uGillA; uniform vec3 uGillB; uniform vec3 uCap; uniform vec3 uPat; uniform vec3 uStem;
-      uniform int uPattern; uniform int uStemTex; uniform float uGlow;
+      uniform int uPattern; uniform int uStemTex; uniform float uGlow; uniform float uJelly;
       varying float vPart; varying float vRad; varying vec3 vLocal; varying vec3 vNormal; varying float vDist;
-      varying vec3 vTint; varying float vPhase; varying float vSeed;
+      varying vec3 vTint; varying float vPhase; varying float vSeed; varying vec2 vLod; varying float vCamDist; varying vec3 vView;
       ${GLSL_NOISE}
       ${GLSL_FOG}
+      ${GLSL_LOD_DITHER}
       void main(){
+        if (lodDiscard(vLod, vCamDist)) discard;
         int part = int(vPart + 0.5);
         vec3 n = normalize(vNormal);
         if (!gl_FrontFacing) n = -n;
@@ -390,6 +421,12 @@ export function speciesMaterial(sp: SpeciesDef, sway: number): THREE.ShaderMater
           float stripes = 0.55 + 0.45 * sin(ang * 64.0);
           col = mix(gA, gB, vRad) * (0.25 + 0.9 * vRad) * stripes * pulse * uGlow;
         }
+        // Gallerthut: durchscheinend (gedithert, kein Sortieren nötig), innen leuchtend, Rand heller
+        if (uJelly > 0.5 && part >= 1 && part != 4) {
+          float fres = pow(1.0 - abs(dot(n, normalize(vView))), 2.0);
+          if (bayer4(gl_FragCoord.xy + 2.0) > 0.55 + 0.4 * fres) discard;
+          col = mix(gA, gB, vRad) * (0.35 + 0.6 * pulse) + gB * fres * 0.7;
+        }
         gl_FragColor = vec4(applyFog(col, vDist), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -398,12 +435,14 @@ export function speciesMaterial(sp: SpeciesDef, sway: number): THREE.ShaderMater
 }
 
 /** Instanz-Attribute für eine Art anlegen. */
-export function attachInstanceAttributes(geo: THREE.BufferGeometry, count: number): { tint: Float32Array; phase: Float32Array; seed: Float32Array } {
+export function attachInstanceAttributes(geo: THREE.BufferGeometry, count: number): { tint: Float32Array; phase: Float32Array; seed: Float32Array; lod: Float32Array } {
   const tint = new Float32Array(count * 3);
   const phase = new Float32Array(count);
   const seed = new Float32Array(count);
+  const lod = new Float32Array(count * 2);
+  geo.setAttribute('aLod', new THREE.InstancedBufferAttribute(lod, 2));
   geo.setAttribute('aTint', new THREE.InstancedBufferAttribute(tint, 3));
   geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
   geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 1));
-  return { tint, phase, seed };
+  return { tint, phase, seed, lod };
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { AudioEngine } from '../../audio/audio';
 import type { QualityProfile } from '../scene';
-import { nextInterval } from '../../audio/insectSounds';
+import { nextFlybyInterval, nextInterval } from '../../audio/insectSounds';
 import { mulberry32, safeMerge, worldUniforms } from '../shared';
 import { regionRadius } from './basin';
 import type { World } from './index';
@@ -220,7 +220,8 @@ export function createInsects(
   // --- Ton: Vorbeiflug alle 5–20 s, Zirpen aus den Wällen alle 8–20 s ---
   let enabled = true;
   let landingOn = true;
-  // Einzelgeräusche: alle 1,5–6 s (je nach Chor-Intensität), max. 6 gleichzeitig (AudioEngine)
+  // Vorbeiflüge alle 0,5–3 s (bis 8 gleichzeitig), Zirpen aus Wall/Vegetation alle 1,5–6 s
+  let nextFlyby = 1 + rng();
   let nextSound = 2 + rng() * 2;
 
   const m = new THREE.Matrix4();
@@ -284,26 +285,24 @@ export function createInsects(
       writeMatrices(dragon);
       writeMatrices(moths);
 
+      nextFlyby -= dt;
+      if (nextFlyby <= 0) {
+        nextFlyby = nextFlybyInterval(rng(), audio.intensity());
+        // hörbar am Kopf vorbei (≥ 0,8 m), Start dort, wo gerade ein echtes Insekt in der Nähe fliegt
+        const cands = agents.filter((a) => a.kind !== 'firefly' && Math.hypot(a.p.x - head.x, a.p.z - head.z) < 7);
+        const a = cands.length ? cands[Math.floor(rng() * cands.length)] : null;
+        audio.playFlyby({ x: fwd.x, y: fwd.y, z: fwd.z }, a ? { ...a.p } : null);
+      }
       nextSound -= dt;
       if (nextSound <= 0) {
         nextSound = nextInterval(rng(), audio.intensity());
-        // Vorbeiflug: an einem echten Insekt, das gerade in 1–6 m Entfernung fliegt
-        const cands = agents.filter((a) => {
-          const d = Math.hypot(a.p.x - head.x, a.p.y - head.y, a.p.z - head.z);
-          return d > 1.0 && d < 6 && a.kind !== 'firefly';
-        });
-        if (cands.length && rng() < 0.55) {
-          const a = cands[Math.floor(rng() * cands.length)];
-          audio.playCreature('flyby', () => a.p);
-        } else {
-          // Zirpen: aus der Vegetation am Boden oder aus dem Wall (Geländehöhe aus der Höhenfunktion)
-          const spots = world.chirpSpots;
-          const w = spots.length && rng() < 0.6 ? spots[Math.floor(rng() * spots.length)].clone() : (() => {
-            const p = env.wallPoint(rng, 0.05, 0.4);
-            return new THREE.Vector3(p.x, p.y, p.z);
-          })();
-          audio.playCreature('ground', () => w);
-        }
+        // Zirpen: aus der Vegetation am Boden oder aus dem Wall (Geländehöhe aus der Höhenfunktion)
+        const spots = world.chirpSpots;
+        const w = spots.length && rng() < 0.6 ? spots[Math.floor(rng() * spots.length)].clone() : (() => {
+          const p = env.wallPoint(rng, 0.05, 0.4);
+          return new THREE.Vector3(p.x, p.y, p.z);
+        })();
+        audio.playCreature('ground', () => w);
       }
     },
   };

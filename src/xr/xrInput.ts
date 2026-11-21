@@ -15,6 +15,9 @@ export interface XRPointer extends Pointer {
   kind: 'controller' | 'hand';
   /** Zeigefingerspitze (Hand) bzw. Spitze (Controller) – zum „Antippen“ von Knöpfen */
   tip: THREE.Vector3;
+  /** Zielstrahl der Eingabequelle (für den optionalen Greifstrahl) */
+  rayOrigin: THREE.Vector3;
+  rayDir: THREE.Vector3;
 }
 
 const PINCH_ON = 0.02;
@@ -57,7 +60,7 @@ export class XRInput {
       rig.add(ray, grip, hand);
       const slot: Slot = {
         index: i, source: null, ray, grip, hand, select: false, squeeze: false, pinching: false, buttons: [], prevButtons: [],
-        pointer: { id: `xr${i}`, pressed: false, point: new THREE.Vector3(), tip: new THREE.Vector3(), handedness: 'right', kind: 'controller' },
+        pointer: { id: `xr${i}`, pressed: false, point: new THREE.Vector3(), tip: new THREE.Vector3(), handedness: 'right', kind: 'controller', rayOrigin: new THREE.Vector3(), rayDir: new THREE.Vector3(0, 0, -1) },
       };
       ray.addEventListener('connected', (e) => {
         const src = (e as unknown as { data: XRInputSource }).data;
@@ -113,6 +116,8 @@ export class XRInput {
     for (const s of this.slots) {
       if (!s.source) continue;
       const p = s.pointer;
+      s.ray.getWorldPosition(p.rayOrigin);
+      p.rayDir.set(0, 0, -1).applyQuaternion(s.ray.getWorldQuaternion(new THREE.Quaternion()));
       s.prevButtons = s.buttons;
       s.buttons = (s.source.gamepad?.buttons ?? []).map((b) => b.pressed);
       col.copy(colorFor(p.handedness));

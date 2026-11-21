@@ -32,12 +32,16 @@ export interface QualityProfile {
   terrainAngular: number;
   /** Insekten gesamt (Vorgabe: Low 30, Medium 80, High 200). */
   insects: number;
+  /** Neue Alien-Flora: Instanzen je Art (bei zu wenig FPS zuerst die Fernanteile senken). */
+  flora: { bubble: number; tentacle: number; fan: number; coral: number; leaf: number; capsule: number; clumpA: number; clumpB: number };
+  /** Riesenpilze mit herabhängenden Leuchtfäden */
+  hangingCaps: number;
 }
 
 export const QUALITY: Record<Quality, QualityProfile> = {
-  low: { pixelRatio: 1, bloom: false, latheSegments: 18, shroomDetail: 'low', nearShrooms: 60, rimGiants: 12, farShrooms: 40, vfarShrooms: 120, saumPerMeter: 3, babies: 40, ferns: 90, pods: 40, spores: 300, vines: 10, mycelium: 20, terrainAngular: 72, insects: 30 },
-  medium: { pixelRatio: 1.5, bloom: false, latheSegments: 26, shroomDetail: 'medium', nearShrooms: 120, rimGiants: 22, farShrooms: 70, vfarShrooms: 220, saumPerMeter: 5, babies: 100, ferns: 220, pods: 100, spores: 800, vines: 20, mycelium: 45, terrainAngular: 96, insects: 80 },
-  high: { pixelRatio: 2, bloom: true, latheSegments: 36, shroomDetail: 'high', nearShrooms: 280, rimGiants: 36, farShrooms: 120, vfarShrooms: 420, saumPerMeter: 8, babies: 220, ferns: 480, pods: 200, spores: 2000, vines: 36, mycelium: 90, terrainAngular: 128, insects: 200 },
+  low: { pixelRatio: 1, bloom: false, latheSegments: 18, shroomDetail: 'low', nearShrooms: 60, rimGiants: 12, farShrooms: 40, vfarShrooms: 120, saumPerMeter: 3, babies: 40, ferns: 90, pods: 40, spores: 300, vines: 10, mycelium: 20, terrainAngular: 72, insects: 30, flora: { bubble: 14, tentacle: 12, fan: 12, coral: 18, leaf: 12, capsule: 12, clumpA: 40, clumpB: 24 }, hangingCaps: 5 },
+  medium: { pixelRatio: 1.5, bloom: false, latheSegments: 26, shroomDetail: 'medium', nearShrooms: 100, rimGiants: 20, farShrooms: 40, vfarShrooms: 110, saumPerMeter: 5, babies: 90, ferns: 170, pods: 90, spores: 800, vines: 20, mycelium: 45, terrainAngular: 96, insects: 80, flora: { bubble: 26, tentacle: 22, fan: 22, coral: 28, leaf: 18, capsule: 22, clumpA: 80, clumpB: 44 }, hangingCaps: 10 },
+  high: { pixelRatio: 2, bloom: true, latheSegments: 36, shroomDetail: 'high', nearShrooms: 280, rimGiants: 36, farShrooms: 120, vfarShrooms: 420, saumPerMeter: 8, babies: 220, ferns: 480, pods: 200, spores: 2000, vines: 36, mycelium: 90, terrainAngular: 128, insects: 200, flora: { bubble: 70, tentacle: 60, fan: 60, coral: 100, leaf: 60, capsule: 60, clumpA: 200, clumpB: 110 }, hangingCaps: 20 },
 };
 
 export type FrameCallback = (dt: number, time: number, frame?: XRFrame) => void;
@@ -56,7 +60,9 @@ export class SceneContext {
 
   constructor(container: HTMLElement, public quality: Quality) {
     this.profile = QUALITY[quality];
-    this.renderer = new THREE.WebGLRenderer({ antialias: quality !== 'low', powerPreference: 'high-performance' });
+    // MSAA immer an – auch auf der Quest (Low): der XR-Framebuffer übernimmt `antialias` (4× MSAA auf
+    // Tile-GPUs nahezu kostenlos) und es verhindert das Flimmern feiner Kanten wie der Figurenkontur.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.profile.pixelRatio));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;

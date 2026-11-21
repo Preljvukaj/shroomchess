@@ -46,12 +46,20 @@ export function createTerrain(basin: Basin, angular = 96): THREE.Mesh {
         float wall = smoothstep(0.02, 0.6, h);
         float r = length(p - uCenter);
         float nse = fbm(p * 0.35 + h * 0.2);
-        // Grundfarben: Erde → Moos am Hang → dunkles Plateau
-        vec3 soil = mix(vec3(0.018, 0.014, 0.03), vec3(0.03, 0.02, 0.05), nse);
-        float moss = smoothstep(0.4, 0.7, fbm(vec2(p.x + h, p.y - h) * 0.9 + 3.0));
-        vec3 col = mix(soil, vec3(0.012, 0.035, 0.032), moss);
-        vec3 wallMoss = mix(vec3(0.015, 0.05, 0.04), vec3(0.03, 0.09, 0.06), fbm(p * 2.2 + h));
-        col = mix(col, wallMoss, wall * (0.6 + 0.4 * moss));
+        // Umgebung grün: saftiges Moos, Bodendecker, kurzes gras-artiges Alien-Gewächs.
+        // Mehrere Grüntöne (Smaragd → Moosgrün → türkisgrün) per Noise gemischt.
+        vec3 emerald = vec3(0.018, 0.085, 0.045);
+        vec3 mossG   = vec3(0.04, 0.075, 0.02);
+        vec3 teal    = vec3(0.015, 0.075, 0.065);
+        float m1 = fbm(vec2(p.x + h, p.y - h) * 0.6 + 3.0);
+        float m2 = fbm(p * 1.9 + 8.0);
+        vec3 col = mix(mix(emerald, mossG, smoothstep(0.35, 0.65, m1)), teal, smoothstep(0.55, 0.8, m2));
+        // gras-artige Struktur: feine, gerichtete Streifen + Polster
+        float blades = 0.5 + 0.5 * sin(p.x * 55.0 + sin(p.y * 13.0) * 2.0 + fbm(p * 6.0) * 6.0);
+        col *= 0.82 + 0.28 * blades * fbm(p * 12.0);
+        float cushion = smoothstep(0.62, 0.75, fbm(p * 3.3 + 1.0));
+        col = mix(col, col * 1.35 + vec3(0.0, 0.015, 0.008), cushion);
+        float moss = m1;
         // Wurzeln: dunkle, gewundene Stränge am Hang
         float rootN = abs(fbm(vec2(atan(p.y - uCenter.y, p.x - uCenter.x) * 9.0, h * 1.6)) - 0.5);
         float root = (1.0 - smoothstep(0.0, 0.035, rootN)) * wall;
@@ -70,6 +78,9 @@ export function createTerrain(basin: Basin, angular = 96): THREE.Mesh {
         // leuchtende Moos-Sprenkel auf dem Hang
         float speck = step(0.988, hash12(floor(vec2(p.x + h, p.y) * 9.0))) * (moss + wall);
         col += vec3(0.4, 1.0, 0.3) * speck * (0.5 + 0.5 * sin(uTime * 2.0 + hash12(floor(p*9.0)) * 30.0)) * 0.35;
+        // leuchtende Grasspitzen, vereinzelt
+        float tip = step(0.985, hash12(floor(p * 30.0)));
+        col += vec3(0.3, 1.0, 0.6) * tip * 0.12 * (0.6 + 0.4 * sin(uTime * 1.5 + p.x * 3.0));
         gl_FragColor = vec4(applyFog(col, vDist), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

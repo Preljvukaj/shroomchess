@@ -69,3 +69,62 @@ describe('Greifen: Snap in die Hand', () => {
     expect(grabConfig.snapSeconds).toBeLessThanOrEqual(0.12);
   });
 });
+
+import { columnConfig, dropSquareAt, heldFootY, pickColumnTarget } from '../src/render/grab';
+import { squareAt } from '../src/render/board';
+
+describe('Greif-Säule', () => {
+  const S = 0.5; // Feldbreite (m)
+  const mk = (id: string, x: number, z: number) => ({ item: id, x, z, gripY: 1.1 });
+  const pieces = [mk('e2', 0, 0), mk('d2', -S, 0), mk('e3', 0, -S)];
+
+  it('Hand klar über der Figur ist greifbar – in jeder Höhe vom Griffpunkt bis 2,0 m', () => {
+    for (const y of [1.1, 1.3, 1.6, 1.9, 1.99]) expect(pickColumnTarget(pieces, null, { x: 0.05, y, z: -0.03 }, S)).toBe('e2');
+  });
+
+  it('nicht über 2,0 m und nicht deutlich unter dem Griffpunkt', () => {
+    expect(pickColumnTarget(pieces, null, { x: 0, y: 2.05, z: 0 }, S)).toBeNull();
+    expect(pickColumnTarget(pieces, null, { x: 0, y: 0.9, z: 0 }, S)).toBeNull();
+  });
+
+  it('über dem Nachbarfeld bzw. zwischen den Feldern nicht', () => {
+    expect(pickColumnTarget([mk('e2', 0, 0)], null, { x: -S, y: 1.5, z: 0 }, S)).toBeNull(); // über d2 (leer)
+    expect(pickColumnTarget([mk('e2', 0, 0)], null, { x: S * 0.45, y: 1.5, z: 0 }, S)).toBeNull(); // Feldrand
+    expect(pickColumnTarget(pieces, null, { x: -S * 0.95, y: 1.5, z: 0 }, S)).toBe('d2');
+  });
+
+  it('Säulen benachbarter Felder überschneiden sich nie (Radius < 50 %), auch mit Hysterese nicht', () => {
+    expect(columnConfig.radiusFactor).toBeLessThan(0.5);
+    expect(columnConfig.radiusFactor * columnConfig.exitFactor).toBeLessThan(0.5);
+  });
+
+  it('Hysterese: Eintritt beim Radius, Austritt erst bei +20 %', () => {
+    const r = columnConfig.radiusFactor * S;
+    let cur: string | null = null;
+    const at = (x: number) => (cur = pickColumnTarget([mk('e2', 0, 0)], cur, { x, y: 1.5, z: 0 }, S));
+    expect(at(r * 1.1)).toBeNull(); // von außen: 110 % reicht nicht
+    expect(at(r * 0.95)).toBe('e2'); // Eintritt
+    expect(at(r * 1.15)).toBe('e2'); // bis 120 % bleibt es
+    expect(at(r * 1.25)).toBeNull(); // Austritt
+  });
+
+  it('mehrere möglich → kleinster horizontaler Abstand gewinnt', () => {
+    const close = [mk('a', 0, 0), mk('b', 0.1, 0)]; // künstlich nah (nur für den Test)
+    expect(pickColumnTarget(close, null, { x: 0.08, y: 1.5, z: 0 }, S)).toBe('b');
+  });
+
+  it('Ablegen zählt das Feld unter der Hand (horizontal), nicht die Höhe', () => {
+    // Brett-lokal (Feld 0,5): e4 = Linie 4, Reihe 3 → x = 0,25, z = (3,5 − 3)·0,5 = +0,25
+    const sq = (x: number, z: number) => squareAt(x, z, 0.5);
+    for (const y of [0.0, 0.4, 1.0, 1.8, 2.5]) {
+      expect(dropSquareAt({ x: 0.26, y, z: 0.27 }, sq)).toBe('e4');
+      expect(dropSquareAt({ x: -0.26, y, z: 0.27 }, sq)).toBe('d4');
+    }
+  });
+
+  it('Fuß der getragenen Figur nie unter der Brettoberfläche', () => {
+    expect(heldFootY(0.3, 0.55)).toBe(0); // Hand in Hüfthöhe, Figur hoch → wird begrenzt
+    expect(heldFootY(1.5, 0.55)).toBeCloseTo(0.95);
+    for (let h = -1; h < 3; h += 0.1) expect(heldFootY(h, 1.1)).toBeGreaterThanOrEqual(0);
+  });
+});

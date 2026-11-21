@@ -11,6 +11,8 @@ export const worldUniforms = {
   uTintAmt: { value: 0 },
   uFogColor: { value: new THREE.Color('#05030d') },
   uFogDensity: { value: 0.035 },
+  /** Windböe 0..1 (aus dem Audio-Wind synchronisiert) → stärkeres Wiegen der Vegetation. */
+  uWind: { value: 0 },
 };
 
 export const PALETTE = {

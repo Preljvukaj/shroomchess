@@ -9,7 +9,9 @@ import { worldUniforms } from './shared';
  */
 export class CaptureBowl {
   readonly root = new THREE.Group();
-  private minis: THREE.Mesh[] = [];
+  /** Anker der Mini-Figuren (unsichtbar); gezeichnet wird gebündelt (ein InstancedMesh je Typ). */
+  private minis: { anchor: THREE.Object3D; type: PieceSymbol; color: Color }[] = [];
+  private batches = new Map<string, THREE.InstancedMesh>();
   private readonly radius: number;
   private readonly topY: number;
 
@@ -52,7 +54,7 @@ export class CaptureBowl {
 
   add(type: PieceSymbol, color: Color, animateFrom?: THREE.Vector3, effects?: { tween: (d: number, f: (k: number) => void) => void }): void {
     const i = this.minis.length;
-    const mini = new THREE.Mesh(pieceGeometry(type, Math.max(12, this.segments >> 1)), pieceMaterials(this.high)[color]);
+    const mini = new THREE.Object3D();
     const s = this.kingHeight * 0.2;
     mini.scale.setScalar(s);
     // Spirale in der Schale
@@ -63,7 +65,7 @@ export class CaptureBowl {
     const rr = this.radius * (ring === 0 ? 0.35 : 0.7);
     const target = new THREE.Vector3(Math.cos(a) * rr, this.topY + this.radius * 0.05 + ring * this.radius * 0.08, Math.sin(a) * rr);
     this.root.add(mini);
-    this.minis.push(mini);
+    this.minis.push({ anchor: mini, type, color });
     if (animateFrom && effects) {
       const from = this.root.worldToLocal(animateFrom.clone());
       mini.position.copy(from);
@@ -81,7 +83,27 @@ export class CaptureBowl {
   }
 
   clear(): void {
-    for (const m of this.minis) m.removeFromParent();
+    for (const m of this.minis) m.anchor.removeFromParent();
     this.minis = [];
+    for (const b of this.batches.values()) b.count = 0;
+  }
+
+  /** Pro Frame: Mini-Figuren gebündelt zeichnen. */
+  update(): void {
+    for (const b of this.batches.values()) b.count = 0;
+    for (const m of this.minis) {
+      const key = `${m.color}${m.type}`;
+      let b = this.batches.get(key);
+      if (!b) {
+        b = new THREE.InstancedMesh(pieceGeometry(m.type, Math.max(12, this.segments >> 1)), pieceMaterials(this.high)[m.color], 16);
+        b.frustumCulled = false;
+        b.count = 0;
+        this.batches.set(key, b);
+        this.root.add(b);
+      }
+      m.anchor.updateMatrix();
+      b.setMatrixAt(b.count++, m.anchor.matrix);
+    }
+    for (const b of this.batches.values()) b.instanceMatrix.needsUpdate = true;
   }
 }

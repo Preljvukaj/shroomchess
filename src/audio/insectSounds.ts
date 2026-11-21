@@ -138,8 +138,21 @@ export function generateBedLoop(kind: 'crickets' | 'hum' | 'trills', seconds: nu
   return { left: L, right: R, seconds };
 }
 
-/** Kategorien der Einzelgeräusche: Vorbeiflug (an fliegenden Insekten) und Boden (Wall/Vegetation). */
-export type CreatureCategory = 'flyby' | 'ground';
+/**
+ * Kategorien: Vorbeiflug (Insekten), Boden (Zirpen aus Wall/Vegetation), Pflanze (Blasen, Ranken,
+ * Sporen), Tropfen (von Pilzhüten), Ruf (ferne, melodisch-komische Alien-Rufe).
+ */
+export type CreatureCategory = 'flyby' | 'ground' | 'plant' | 'drip' | 'call';
+
+/** Während `build()` gesammelte Tonhöhen-Parameter (Detune) – für Doppler-Verläufe. */
+let pitchCollector: AudioParam[] | null = null;
+export function collectPitch<T>(fn: () => T): { result: T; params: AudioParam[] } {
+  pitchCollector = [];
+  const result = fn();
+  const params = pitchCollector;
+  pitchCollector = null;
+  return { result, params };
+}
 
 export interface Recipe {
   id: string;
@@ -155,6 +168,7 @@ function osc(ctx: BaseAudioContext, type: OscillatorType, f: number, t: number, 
   o.frequency.setValueAtTime(f, t);
   o.start(t);
   o.stop(t + dur + 0.05);
+  pitchCollector?.push(o.detune);
   return o;
 }
 
@@ -164,6 +178,7 @@ function noiseSrc(ctx: BaseAudioContext, buf: AudioBuffer, t: number, dur: numbe
   s.loop = true;
   s.start(t, Math.random() * Math.max(0, buf.duration - 0.1));
   s.stop(t + dur + 0.05);
+  pitchCollector?.push(s.detune);
   return s;
 }
 
@@ -255,6 +270,106 @@ export const RECIPES: Recipe[] = [
   { id: 'klickkaefer', category: 'ground', duration: [0.3, 0.6], build: (c, o, t, _d, p, n) => clicks(c, o, t, 3 + Math.floor(Math.random() * 4), 0.07, 2500 * p, n) },
   { id: 'zikadenticks', category: 'ground', duration: [0.4, 0.9], build: (c, o, t, _d, p, n) => clicks(c, o, t, 10, 0.035, 1200 * p, n) },
   { id: 'gluehfunke', category: 'ground', duration: [0.25, 0.4], build: (c, o, t, _d, p) => pulses(c, o, t, 2, 0.09, 7000 * p, 0.03) },
+  // --- weitere Insekten (insgesamt ≥ 20) ---
+  { id: 'hornisse', category: 'flyby', duration: [1.0, 1.8], build: (c, o, t, d, p) => osc(c, 'sawtooth', 150 * p, t, d).connect(filt(c, 'bandpass', 700 * p, 2)).connect(trem(c, 35, 0.35, t, d)).connect(o) },
+  { id: 'schwebfliege', category: 'flyby', duration: [1.4, 2.4], build: (c, o, t, d, p) => {
+    const s = osc(c, 'triangle', 330 * p, t, d);
+    const g = c.createGain();
+    // Schweben mit Aussetzern: Lautstärke springt zwischen an/aus
+    g.gain.setValueAtTime(0.9, t);
+    for (let k = 0.3; k < d; k += 0.35 + Math.random() * 0.3) g.gain.setTargetAtTime(Math.random() < 0.35 ? 0.1 : 0.9, t + k, 0.03);
+    s.connect(filt(c, 'bandpass', 1500, 2)).connect(trem(c, 55, 0.3, t, d)).connect(g).connect(o);
+  } },
+  { id: 'brummer', category: 'flyby', duration: [1.6, 2.6], build: (c, o, t, d, p) => osc(c, 'square', 95 * p, t, d).connect(filt(c, 'lowpass', 500, 1)).connect(trem(c, 22, 0.4, t, d)).connect(o) },
+  { id: 'grillentriller', category: 'ground', duration: [1.0, 1.8], build: (c, o, t, d, p) => pulses(c, o, t, Math.round(d * 28), 1 / 28, 4200 * p, 0.022) },
+  { id: 'rhythmusklicker', category: 'ground', duration: [0.8, 1.4], build: (c, o, t, _d, p, n) => {
+    for (let k = 0; k < 4; k++) clicks(c, o, t + k * 0.28, 2, 0.05, 1800 * p, n);
+  } },
+  { id: 'heuschrecke', category: 'ground', duration: [0.5, 0.9], build: (c, o, t, d, p, n) => {
+    clicks(c, o, t, 1, 0.01, 900 * p, n); // Sprung-Schnalzen
+    noiseSrc(c, n, t + 0.08, d - 0.08).connect(filt(c, 'bandpass', 3600 * p, 4)).connect(trem(c, 24, 0.9, t, d)).connect(o);
+  } },
+  { id: 'zirpchor', category: 'ground', duration: [0.9, 1.5], build: (c, o, t, _d, p) => {
+    for (let k = 0; k < 3; k++) pulses(c, o, t + k * 0.12 + Math.random() * 0.05, 3, 0.03, (4300 + k * 350) * p, 0.016);
+  } },
+  // --- Pflanzen ---
+  { id: 'blubbern', category: 'plant', duration: [0.4, 0.9], build: (c, o, t, d, p) => {
+    for (let k = 0; k < 3; k++) {
+      const st = t + k * (d / 3) + Math.random() * 0.05;
+      const s = osc(c, 'sine', 380 * p, st, 0.12);
+      s.frequency.exponentialRampToValueAtTime(160 * p, st + 0.1);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0, st);
+      g.gain.linearRampToValueAtTime(0.7, st + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, st + 0.12);
+      s.connect(g).connect(o);
+    }
+  } },
+  { id: 'ploppen', category: 'plant', duration: [0.2, 0.3], build: (c, o, t, _d, p) => {
+    const s = osc(c, 'sine', 700 * p, t, 0.1);
+    s.frequency.exponentialRampToValueAtTime(220 * p, t + 0.08);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.9, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    s.connect(g).connect(o);
+  } },
+  { id: 'rascheln', category: 'plant', duration: [0.6, 1.2], build: (c, o, t, d, p, n) => noiseSrc(c, n, t, d).connect(filt(c, 'highpass', 2500 * p, 0.7)).connect(trem(c, 9, 0.8, t, d)).connect(o) },
+  { id: 'knistern', category: 'plant', duration: [0.5, 1.0], build: (c, o, t, d, p, n) => clicks(c, o, t, Math.round(d * 18), d / Math.round(d * 18), 3500 * p, n) },
+  { id: 'sporenpuff', category: 'plant', duration: [0.4, 0.6], build: (c, o, t, d, p, n) => {
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.8, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    noiseSrc(c, n, t, d).connect(filt(c, 'lowpass', 900 * p, 0.8)).connect(g).connect(o);
+  } },
+  // --- Tropfen von den Pilzhüten ---
+  { id: 'tropfen', category: 'drip', duration: [0.15, 0.25], build: (c, o, t, _d, p) => {
+    const s = osc(c, 'sine', 1900 * p, t, 0.08);
+    s.frequency.exponentialRampToValueAtTime(900 * p, t + 0.06);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.8, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    s.connect(g).connect(o);
+  } },
+  // --- ferne, melodisch-komische Alien-Rufe ---
+  { id: 'wuu-ip', category: 'call', duration: [0.8, 1.2], build: (c, o, t, d, p) => {
+    const s = osc(c, 'sine', 300 * p, t, d);
+    s.frequency.exponentialRampToValueAtTime(220 * p, t + d * 0.4);
+    s.frequency.exponentialRampToValueAtTime(700 * p, t + d);
+    const v = osc(c, 'sine', 7, t, d);
+    const vg = c.createGain();
+    vg.gain.value = 15;
+    v.connect(vg).connect(s.frequency);
+    s.connect(o);
+  } },
+  { id: 'boing', category: 'call', duration: [0.6, 0.9], build: (c, o, t, d, p) => {
+    const s = osc(c, 'triangle', 180 * p, t, d);
+    s.frequency.setValueAtTime(180 * p, t);
+    s.frequency.exponentialRampToValueAtTime(520 * p, t + 0.12);
+    s.frequency.exponentialRampToValueAtTime(260 * p, t + d);
+    const m = osc(c, 'sine', 11, t, d);
+    const mg = c.createGain();
+    mg.gain.value = 40;
+    m.connect(mg).connect(s.frequency);
+    s.connect(o);
+  } },
+  { id: 'gurren', category: 'call', duration: [1.0, 1.4], build: (c, o, t, d, p) => {
+    for (let k = 0; k < 3; k++) {
+      const st = t + k * (d / 3);
+      const s = osc(c, 'sine', (420 - k * 40) * p, st, d / 3);
+      s.frequency.exponentialRampToValueAtTime((360 - k * 40) * p, st + d / 3);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0, st);
+      g.gain.linearRampToValueAtTime(0.8, st + 0.05);
+      g.gain.linearRampToValueAtTime(0, st + d / 3);
+      s.connect(g).connect(o);
+    }
+  } },
+  { id: 'trillerflöte', category: 'call', duration: [0.9, 1.3], build: (c, o, t, d, p) => {
+    const s = osc(c, 'sine', 900 * p, t, d);
+    for (let k = 0; k < 6; k++) s.frequency.setValueAtTime((900 + (k % 2) * 180 + k * 40) * p, t + (k * d) / 6);
+    s.connect(o);
+  } },
 ];
 
 export function recipesFor(cat: CreatureCategory): Recipe[] {
@@ -270,8 +385,17 @@ export function chorusIntensity(seconds: number): number {
   return Math.min(1, Math.max(0.3, v));
 }
 
-/** Zufälliges Intervall bis zum nächsten Einzelgeräusch: 1,5–6 s, bei hoher Intensität kürzer. */
+/** Zufälliges Intervall bis zum nächsten Boden-Einzelgeräusch: 1,5–6 s, bei hoher Intensität kürzer. */
 export function nextInterval(rnd: number, intensity: number): number {
   const base = 1.5 + rnd * 4.5;
   return Math.min(6, Math.max(1.5, base * (1.25 - 0.5 * intensity)));
 }
+
+/** Intervall bis zum nächsten Insekten-Vorbeiflug: 0,5–3 s, bei hoher Intensität dichter. */
+export function nextFlybyInterval(rnd: number, intensity: number): number {
+  const base = 0.5 + rnd * 2.5;
+  return Math.min(3, Math.max(0.5, base * (1.3 - 0.6 * intensity)));
+}
+
+/** Insekten-Rezepte (Vorbeiflug + Boden) – Vorgabe: mindestens 20. */
+export const INSECT_RECIPES = (): Recipe[] => RECIPES.filter((r) => r.category === 'flyby' || r.category === 'ground');

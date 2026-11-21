@@ -3,7 +3,7 @@ import type { ChessGame } from '../core/game';
 import type { Color, MoveOption, PieceSymbol, Square } from '../core/types';
 import { squareAt } from './board';
 import type { BoardScene } from './boardScene';
-import { grabConfig, pickGrabTarget, snapOffset } from './grab';
+import { columnConfig, grabConfig, heldFootY, pickColumnTarget, pickGrabTarget, snapOffset } from './grab';
 import type { PieceView } from './pieceView';
 import { PLAYER_GLOW } from './pieces';
 
@@ -46,6 +46,9 @@ interface PointerState {
   /** Snap in die Hand: Startversatz Griffpunkt − Hand (Welt) und Startzeit */
   snapStart: THREE.Vector3 | null;
   snapT0: number;
+  snapDur: number;
+  /** Figur, über der die Hand gerade in der Greif-Säule ist */
+  columnTarget: PieceView | null;
 }
 
 export class InteractionController {
@@ -57,11 +60,15 @@ export class InteractionController {
   enabled = true;
   /** Skalierung der Greif-Abstände (Tischmodus: kleines Brett → kleinere Zonen). */
   distanceScale = 1;
+  /** Sporenfäden von der Hand senkrecht hinunter zum Griffpunkt (Säulen-Greifen), einer pro Zeiger. */
+  readonly beams = new THREE.Group();
+  private beamMeshes = new Map<string, THREE.Mesh>();
 
   constructor(private scene: BoardScene, private game: ChessGame, private hooks: InteractionHooks) {
     this.outline = new THREE.Mesh(
       new THREE.BufferGeometry(),
-      new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.BackSide, transparent: true, opacity: 0.7, depthWrite: false }),
+      // Umriss (Inverted Hull) leicht nach hinten versetzt → kein Z-Fighting mit der Figur
+      new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.BackSide, transparent: true, opacity: 0.7, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 }),
     );
     this.outline.visible = false;
     this.outline.renderOrder = 1;
@@ -74,7 +81,7 @@ export class InteractionController {
   private state(id: string): PointerState {
     let s = this.states.get(id);
     if (!s) {
-      s = { held: null, selected: null, pressStart: null, pressPiece: null, wasPressed: false, dragged: false, lastCandidate: null, hoverSquare: null, grabTarget: null, snapStart: null, snapT0: 0 };
+      s = { held: null, selected: null, pressStart: null, pressPiece: null, wasPressed: false, dragged: false, lastCandidate: null, hoverSquare: null, grabTarget: null, snapStart: null, snapT0: 0, snapDur: grabConfig.snapSeconds, columnTarget: null };
       this.states.set(id, s);
     }
     return s;
@@ -161,11 +168,11 @@ export class InteractionController {
           if (ptr.point && p.root.parent) {
             // Hand: Griffpunkt schnappt in ~100 ms (ease-out) an den Greifpunkt und hängt dann fest
             // daran – nur Position, keine Drehung (Figur bleibt aufrecht).
-            const off = st.snapStart ? snapOffset(st.snapStart, performance.now() / 1000 - st.snapT0) : { x: 0, y: 0, z: 0 };
+            const off = st.snapStart ? snapOffset(st.snapStart, performance.now() / 1000 - st.snapT0, { ...grabConfig, snapSeconds: st.snapDur }) : { x: 0, y: 0, z: 0 };
             const target = ptr.point.clone().add(new THREE.Vector3(off.x, off.y, off.z));
             const inParent = p.root.parent.worldToLocal(target);
-            // nur verhindern, dass die Figur ins Brett gedrückt wird – sonst exakt an der Hand (kein Versatz)
-            p.root.position.set(inParent.x - p.grip.position.x, Math.max(0, inParent.y - p.grip.position.y), inParent.z - p.grip.position.z);
+            // exakt an der Hand (kein Versatz); Fuß nie unter der Brettoberfläche (hohe Figur in Hüfthöhe)
+            p.root.position.set(inParent.x - p.grip.position.x, heldFootY(inParent.y, p.grip.position.y), inParent.z - p.grip.position.z);
           }
           const sq = squareAt(p.root.position.x, p.root.position.z, this.scene.squareSize);
           this.hooks.onHeldOverSquare?.(sq);
@@ -199,7 +206,16 @@ export class InteractionController {
       // Sonst bei Strahl die getroffene Figur, sonst der nächste Griffpunkt in Annäherungsweite.
       const NEAR = grabConfig.near * this.distanceScale;
       st.grabTarget = pickGrabTarget(pieces, st.grabTarget, (p) => this.distanceTo(ptr, p, tmp), this.distanceScale);
-      const target = st.grabTarget;
+      // Greif-Säule (nur Hand/Controller-Punkt): Hand horizontal klar über einer Figur, in jeder Höhe bis 2 m
+      if (ptr.point && !st.grabTarget) {
+        const sqWorld = this.scene.squareSize * this.scene.root.scale.x;
+        const cands = pieces.map((p) => {
+          const base = p.root.getWorldPosition(new THREE.Vector3());
+          return { item: p, x: base.x, z: base.z, gripY: p.gripWorld(new THREE.Vector3()).y };
+        });
+        st.columnTarget = pickColumnTarget(cands, st.columnTarget, ptr.point, sqWorld);
+      } else st.columnTarget = null;
+      const target = st.grabTarget ?? st.columnTarget;
       const cand = target ?? meshHit ?? (bestD < NEAR ? best : null);
       if (cand) {
         const d = cand === target ? this.distanceTo(ptr, cand, tmp) : meshHit === cand ? 0 : bestD;
@@ -261,6 +277,39 @@ export class InteractionController {
     }
 
     this.updateOutline(outlineTarget);
+    this.updateBeams(pointers);
+  }
+
+  /** Sporenfaden: von der Hand senkrecht nach unten zum Griffpunkt der markierten Säulen-Figur. */
+  private updateBeams(pointers: Pointer[]): void {
+    const used = new Set<string>();
+    for (const ptr of pointers) {
+      const st = this.states.get(ptr.id);
+      const t = st?.columnTarget;
+      if (!ptr.point || !t || st?.held || !this.isMovable(t)) continue;
+      used.add(ptr.id);
+      let m = this.beamMeshes.get(ptr.id);
+      if (!m) {
+        const g = new THREE.CylinderGeometry(0.003, 0.006, 1, 6, 1, true).translate(0, 0.5, 0);
+        m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending }));
+        m.renderOrder = 9;
+        this.beamMeshes.set(ptr.id, m);
+        this.beams.add(m);
+      }
+      const g = t.gripWorld(new THREE.Vector3());
+      const len = Math.max(0.01, ptr.point.y - g.y);
+      m.position.set(g.x, g.y, g.z);
+      m.scale.set(1, len, 1);
+      (m.material as THREE.MeshBasicMaterial).color.copy(PLAYER_GLOW[t.color]);
+      m.visible = true;
+    }
+    for (const [id, m] of this.beamMeshes) if (!used.has(id)) m.visible = false;
+  }
+
+  /** Hat dieser Zeiger gerade eine greifbare Figur (Nah- oder Säulen-Greifen)? */
+  hasTarget(id: string): boolean {
+    const st = this.states.get(id);
+    return !!st && (!!st.grabTarget || !!st.columnTarget || !!st.held);
   }
 
   private markIdle(p: PieceView): PieceView['state'] {
@@ -281,6 +330,8 @@ export class InteractionController {
     st.pressPiece = p;
     p.state = 'held';
     p.flash = 1; // kurzes Aufleuchten des Griffpunkts
+    // aus der Säule fliegt die Figur etwas länger (150 ms) nach oben in die Hand
+    st.snapDur = st.columnTarget === p ? columnConfig.snapSeconds : grabConfig.snapSeconds;
     if (ptr.point) {
       // Greifen klappt im ganzen „greifbar“-Bereich – die Figur schnappt dann in die Hand
       st.snapStart = p.gripWorld(new THREE.Vector3()).sub(ptr.point);
@@ -376,6 +427,7 @@ export class InteractionController {
         st.selected = null;
       }
       st.hoverSquare = null;
+      st.columnTarget = null;
     }
     this.showTargets(null);
     this.scene.highlights.setHover(null);

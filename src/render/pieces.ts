@@ -199,8 +199,17 @@ export function applyRim(mat: THREE.MeshPhysicalMaterial, color: Color): void {
         `#include <opaque_fragment>
         if (uRimWidth > 0.0) {
           float ndv = clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0);
-          float rim = smoothstep(1.0 - uRimWidth, 1.0 - uRimWidth * 0.45, 1.0 - ndv);
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, uRimColor, rim);
+          float f = 1.0 - ndv;
+          // Anti-Flimmern: Kantenbreite über die Bildschirmableitung → Übergang nie schmaler als ~1,5 px
+          float fw = max(fwidth(f), 1e-4);
+          float lo = min(1.0 - uRimWidth, 1.0 - 1.5 * fw);
+          float hi = max(lo + 1.5 * fw, 1.0 - uRimWidth * 0.45);
+          float sharp = smoothstep(lo - fw, hi, f);
+          // In der Ferne weicher, stabiler Fresnel statt schmaler Kante (Subpixel-Bereich)
+          float dist = length(vViewPosition);
+          float soft = pow(f, 2.5) * 0.55;
+          float rim = mix(sharp, soft, smoothstep(4.0, 9.0, dist));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, uRimColor, clamp(rim, 0.0, 1.0));
         }`,
       );
   };
@@ -234,10 +243,11 @@ export function pieceMaterials(high: boolean): Record<Color, THREE.MeshPhysicalM
     }),
     b: new THREE.MeshPhysicalMaterial({
       color: '#100c16',
-      roughness: 0.12,
+      // etwas rauer als zuvor (0,12/0,05): sehr scharfe Glanzpunkte flimmern auf kleinen Rundungen (Specular-Aliasing)
+      roughness: 0.2,
       metalness: 0.1,
       clearcoat: 1,
-      clearcoatRoughness: 0.05,
+      clearcoatRoughness: 0.14,
       emissive: new THREE.Color('#0d0420'),
       emissiveIntensity: 0.5,
     }),

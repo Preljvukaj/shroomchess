@@ -89,7 +89,8 @@ Allgemein:
 | Aktion | Controller | Hände |
 |---|---|---|
 | VR starten | Im Spiel „VR betreten“ antippen (von der Landingpage: „In VR starten“) | |
-| Figur ziehen | Mit der Controllerspitze an den leuchtenden Griffpunkt, Trigger oder Grip halten, zum Feld tragen, loslassen | Daumen und Zeigefinger am Griffpunkt zusammenführen (Pinch), tragen, öffnen |
+| Figur ziehen | Hand bzw. Controller **über** die eigene Figur halten (jede Höhe bis 2 m, Sporenfaden zeigt die Figur) oder direkt an den Griffpunkt, Trigger/Grip drücken → Figur fliegt in die Hand; über dem Zielfeld loslassen | dasselbe mit Pinch |
+| Greifen aus der Distanz | Einstellung **Greifstrahl** (Menü → „Greifstrahl an/aus“): Figur mit dem Strahl anpeilen, Trigger | Strahl aus der Hand, Pinch |
 | Umwandlung | Mini-Figur antippen + Trigger | Mini-Figur pinchen |
 | Menü | Taste **Y** (linker Controller) | **Blick auf die linke Handfläche** |
 | Menüknopf | Mit der rechten Controllerspitze antippen + Trigger | Mit dem rechten Zeigefinger antippen |
@@ -103,8 +104,8 @@ Handtracking. Ohne `bounds` startet die manuelle Flächeneinrichtung. Steuerung 
 
 ### Einstellungen im Spielmenü
 
-Sprache · Qualität · Farbenblind-Palette · Figuren ohne legalen Zug markieren · Untertitel · Lautstärke ·
-**Tiere / Umgebung** (eigene Lautstärke) · **Insekten anzeigen** (aus = auch keine Insektengeräusche) ·
+Sprache · Qualität · Farbenblind-Palette · Figuren ohne legalen Zug markieren · Untertitel · Lautstärke (gesamt) ·
+**Spiel-Sounds** · **Umgebung** · **Tiere / Insekten** (je eigene Lautstärke) · **Greifstrahl** (VR, aus) · **Insekten anzeigen** (aus = auch keine Insektengeräusche) ·
 **Glühwürmchen landen auf der Hand** (VR) · **Koordinatengröße S/M/L** · **Koordinaten hoher Kontrast** ·
 **Koordinaten auf den Feldern** · **Figurenkontrast** Aus/Normal/Hoch (helle Kontur der schwarzen Figuren) ·
 **Dunkle Kontur für Weiß** (optional)

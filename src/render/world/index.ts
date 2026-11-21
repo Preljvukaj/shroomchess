@@ -18,6 +18,8 @@ export interface World {
   chirpSpots: THREE.Vector3[];
   /** Alle platzierten Objekte (Bodenkontakt-Prüfung). */
   grounded: GroundedObject[];
+  /** Klangquellen der Pflanzen/Pilze */
+  soundSpots: ReturnType<typeof createVegetation>['soundSpots'];
   /** Spielende: Dschungel leuchtet in der Siegerfarbe (null = Remis → Violett/Weiß). */
   celebrate(color: THREE.Color | null): void;
   resetTint(): void;
@@ -51,6 +53,7 @@ export function createWorld(profile: QualityProfile, region: FlatRegion): World 
     attractors: veg.attractors,
     chirpSpots: veg.chirpSpots,
     grounded: veg.grounded,
+    soundSpots: veg.soundSpots,
     celebrate(color) {
       worldUniforms.uTint.value.copy(color ?? new THREE.Color('#d7b8ff'));
       target = 0.85;

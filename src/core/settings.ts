@@ -31,6 +31,12 @@ export interface Settings {
   pieceContrast: 'off' | 'normal' | 'high';
   /** Optional: dunkle Kontur für die weißen Figuren. */
   whiteOutline: boolean;
+  /** Komfort: Greifstrahl aus Controller/Hand nach vorne-unten (Sitzmodus, eingeschränkte Beweglichkeit). */
+  grabRay: boolean;
+  /** Lautstärke „Umgebung“ (Wind, Dschungel-Teppich, Pflanzen, Tropfen, Pilz-Summen). */
+  ambienceVolume: number;
+  /** Lautstärke „Spiel-Sounds“ (Zug, Schach, UI). */
+  sfxVolume: number;
 }
 
 const DEFAULTS: Settings = {
@@ -53,6 +59,9 @@ const DEFAULTS: Settings = {
   insectLanding: true,
   pieceContrast: 'normal',
   whiteOutline: false,
+  grabRay: false,
+  ambienceVolume: 0.6,
+  sfxVolume: 0.9,
 };
 
 const KEY = 'myzel-schach.settings.v1';

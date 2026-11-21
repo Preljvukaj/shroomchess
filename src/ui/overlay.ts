@@ -96,9 +96,12 @@ export class Overlay {
             <label><input type="checkbox" data-s="markNoLegalMoves"> ${t('markNoMoves')}</label>
             <label><input type="checkbox" data-s="subtitles"> ${t('subtitles')}</label>
             <label>${t('volume')} <input type="range" min="0" max="1" step="0.05" data-s="volume"></label>
+            <label>${t('sfxVolume')} <input type="range" min="0" max="1" step="0.05" data-s="sfxVolume"></label>
+            <label>${t('ambienceVolume')} <input type="range" min="0" max="1" step="0.05" data-s="ambienceVolume"></label>
             <label>${t('creatures')} <input type="range" min="0" max="1" step="0.05" data-s="creaturesVolume"></label>
             <label><input type="checkbox" data-s="insects"> ${t('insects')}</label>
             <label><input type="checkbox" data-s="insectLanding"> ${t('insectLanding')}</label>
+            <label><input type="checkbox" data-s="grabRay"> ${t('grabRay')}</label>
             <label>${t('coordSize')} <select data-s="coordSize"><option value="S">S</option><option value="M">M</option><option value="L">L</option></select></label>
             <label><input type="checkbox" data-s="coordHighContrast"> ${t('coordContrast')}</label>
             <label><input type="checkbox" data-s="coordsOnSquares"> ${t('coordsOnSquares')}</label>
@@ -161,14 +164,16 @@ export class Overlay {
     // Einstellungen
     this.q<HTMLSelectElement>('[data-s=lang]').value = s.lang;
     this.q<HTMLSelectElement>('[data-s=quality]').value = qv;
-    for (const k of ['colorblind', 'markNoLegalMoves', 'subtitles', 'insects', 'insectLanding', 'coordHighContrast', 'coordsOnSquares', 'whiteOutline'] as const) {
+    for (const k of ['colorblind', 'markNoLegalMoves', 'subtitles', 'insects', 'insectLanding', 'coordHighContrast', 'coordsOnSquares', 'whiteOutline', 'grabRay'] as const) {
       const cb = this.q<HTMLInputElement>(`[data-s=${k}]`);
       cb.checked = s[k];
       cb.addEventListener('change', () => settings.set({ [k]: cb.checked }));
     }
-    const cv = this.q<HTMLInputElement>('[data-s=creaturesVolume]');
-    cv.value = String(s.creaturesVolume);
-    cv.addEventListener('input', () => settings.set({ creaturesVolume: Number(cv.value) }));
+    for (const k of ['creaturesVolume', 'ambienceVolume', 'sfxVolume'] as const) {
+      const el = this.q<HTMLInputElement>(`[data-s=${k}]`);
+      el.value = String(s[k]);
+      el.addEventListener('input', () => settings.set({ [k]: Number(el.value) }));
+    }
     const pc = this.q<HTMLSelectElement>('[data-s=pieceContrast]');
     pc.value = s.pieceContrast;
     pc.addEventListener('change', () => settings.set({ pieceContrast: pc.value as 'off' | 'normal' | 'high' }));

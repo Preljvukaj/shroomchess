@@ -16,6 +16,8 @@ describe('Vegetation: Bodenkontakt (Toleranz 3 cm)', () => {
       const b = createBasin({ pts });
       const veg = createVegetation(QUALITY.low, b);
       expect(veg.grounded.length).toBeGreaterThan(200);
+      // neue Flora ist dabei und steht ebenfalls auf dem Boden
+      for (const k of ['bubble', 'tentacle', 'fan', 'coral', 'leaf', 'capsule', 'clumpA', 'clumpB']) expect(veg.grounded.some((o) => o.kind === `flora-${k}`), k).toBe(true);
       const bad = veg.grounded.filter((o) => groundError(b, o.base, o.footRadius) > 0.03);
       expect(bad.map((o) => `${o.kind}@${o.base.x.toFixed(2)},${o.base.z.toFixed(2)}`)).toEqual([]);
       // und keines schwebt über der niedrigsten Stelle seiner Grundfläche
@@ -35,8 +37,11 @@ describe('Vegetation: Bodenkontakt (Toleranz 3 cm)', () => {
       expect(d).toBeLessThan(0.45);
       expect(o.footRadius).toBeLessThanOrEqual(0.07); // 3–6,5 cm groß
     }
-    // alles Höhere beginnt erst am Hangfuß
-    for (const o of veg.grounded.filter((x) => x.kind !== 'saum')) expect(b.distOutside(o.base.x, o.base.z)).toBeGreaterThan(0.85);
+    // direkt am Rand der braunen Fläche nur niedrige Pflanzen (≤ 30 cm); Höheres erst ab dem Hangfuß
+    for (const o of veg.grounded) {
+      const d = b.distOutside(o.base.x, o.base.z);
+      if (d < 0.85) expect(o.height ?? 0, `${o.kind} @ ${d.toFixed(2)} m`).toBeLessThanOrEqual(0.3);
+    }
   });
 
   it('keine kameraausgerichteten Billboards/Sprites in der Vegetation', () => {
@@ -50,6 +55,7 @@ describe('Vegetation: Bodenkontakt (Toleranz 3 cm)', () => {
       meshes++;
       expect(m.name).not.toMatch(/impostor|billboard/i);
       expect(m.geometry).not.toBeInstanceOf(THREE.InstancedBufferGeometry); // früheres Billboard-Verfahren
+      if (m.name.startsWith('flora') || m.name.startsWith('shroom')) expect((m as THREE.InstancedMesh).isInstancedMesh).toBe(true);
       const vs = (m.material as THREE.ShaderMaterial).vertexShader ?? '';
       // Billboarding = Versatz im View-Space nach der Modelview-Transformation
       expect(vs).not.toMatch(/mvCenter|mv\.xy\s*\+=/);
@@ -80,5 +86,27 @@ describe('Spielflächen-Umrandung', () => {
     const box = new THREE.Box3().setFromBufferAttribute(pos as THREE.BufferAttribute);
     expect(box.min.x).toBeLessThan(0);
     expect(box.max.x).toBeGreaterThan(5);
+  });
+});
+
+describe('LOD-Überblendung', () => {
+  it('Objekte am Zonenrand liegen in zwei Stufen mit komplementären Rollen, sonst in genau einer', async () => {
+    const { lodSlots } = await import('../src/render/world/vegetation');
+    const b = createBasin({ pts: squarePolygon(3) });
+    const t = 0;
+    const rim = b.rimDistance(t);
+    const at = (d: number) => {
+      // Punkt im Abstand d außerhalb entlang +X
+      return lodSlots(b, 3 + d, 0);
+    };
+    expect(at(rim - 2).map((s) => s.lod)).toEqual([0]);
+    const band = at(rim + 0.5);
+    expect(band.map((s) => [s.lod, s.role])).toEqual([[0, 1], [1, 2]]);
+    expect(band[0].fade).toBe(band[1].fade);
+    expect(at(rim + 5).map((s) => s.lod)).toEqual([1]);
+    expect(at(rim + 9).map((s) => [s.lod, s.role])).toEqual([[1, 1], [2, 2]]);
+    expect(at(rim + 20).map((s) => s.lod)).toEqual([2]);
+    // Art ohne ferne Stufe: kein Doppel, keine Überblendung
+    expect(lodSlots(b, 3 + rim + 9, 0, 1)).toEqual([{ lod: 1, role: 0, fade: expect.any(Number) }]);
   });
 });

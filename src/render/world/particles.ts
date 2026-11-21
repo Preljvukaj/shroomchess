@@ -80,7 +80,7 @@ export function createParticles(profile: QualityProfile, basinRadius: number): T
  */
 export function createGroundFog(innerRadius: number, outerRadius: number): THREE.Group {
   const g = new THREE.Group();
-  for (const [y, strength] of [[0.1, 0.42], [0.3, 0.18]] as const) {
+  for (const [y, strength] of [[0.1, 0.26], [0.3, 0.1]] as const) {
     const geo = new THREE.CircleGeometry(outerRadius, 64);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.ShaderMaterial({
@@ -99,7 +99,7 @@ export function createGroundFog(innerRadius: number, outerRadius: number): THREE
           float n = fbm(vW.xz * 0.35 + vec2(uTime * 0.03, uTime * 0.017));
           float edge = mix(0.12, 1.0, smoothstep(uIn * 0.7, uIn + 1.5, r)) * (1.0 - smoothstep(uOut * 0.85, uOut, r));
           float a = smoothstep(0.3, 0.8, n) * edge * uStrength;
-          gl_FragColor = vec4(vec3(0.25, 0.2, 0.45) * 0.6, a);
+          gl_FragColor = vec4(vec3(0.16, 0.24, 0.26) * 0.6, a); // neutral-kühl, überdeckt das Grün nicht
         }`,
     });
     const m = new THREE.Mesh(geo, mat);
