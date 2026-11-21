@@ -81,4 +81,25 @@ describe('Insekten: Mindestabstand zum Kopf', () => {
       }
     }
   });
+
+  it('VR: verschobenes, gedrehtes Brett – trotzdem nur Glühwürmchen darüber', () => {
+    const rng = lcg(11);
+    const env = makeEnv(rng, { x: 0, y: 1.65, z: 8 });
+    env.board = { x: 0.8, z: -0.6, yaw: 0.6, baseY: 0 };
+    env.boardHalf = 1.6;
+    const agents = createAgents({ firefly: 30, midge: 30, moth: 20, dragonfly: 20 }, env, rng);
+    for (let step = 0; step < 1500; step++) {
+      stepAgents(agents, env, 1 / 60, rng, step / 60);
+      for (const a of agents) {
+        const dx = a.p.x - 0.8;
+        const dz = a.p.z + 0.6;
+        const bx = dx * Math.cos(0.6) - dz * Math.sin(0.6);
+        const bz = dx * Math.sin(0.6) + dz * Math.cos(0.6);
+        if (Math.abs(bx) < env.boardHalf - 1e-6 && Math.abs(bz) < env.boardHalf - 1e-6) {
+          expect(a.kind).toBe('firefly');
+          expect(a.p.y).toBeGreaterThanOrEqual(env.pieceTop + 0.6 - 1e-9);
+        }
+      }
+    }
+  });
 });

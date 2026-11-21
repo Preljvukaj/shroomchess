@@ -47,6 +47,8 @@ export interface InsectEnv {
   maxRadius: number;
   boardHalf: number;
   pieceTop: number;
+  /** Lage des Bretts (VR: verschoben/gedreht/auf Tischhöhe). Fehlt sie: Brett in `center`, achsparallel. */
+  board?: { x: number; z: number; yaw: number; baseY: number };
   attractors: V3[];
   swarmCenters: V3[];
   /** Ruhig gehaltene Hand (Easter Egg) oder null. */
@@ -84,8 +86,25 @@ export function enforceHeadClearance(p: V3, v: V3, head: V3, min: number): void 
 }
 
 /** Darf diese Art über dem Brett sein (in welcher Mindesthöhe)? */
-export function boardCeiling(kind: InsectKind, env: Pick<InsectEnv, 'pieceTop'>): number {
-  return kind === 'firefly' ? env.pieceTop + 0.6 : Infinity;
+export function boardCeiling(kind: InsectKind, env: Pick<InsectEnv, 'pieceTop' | 'board'>): number {
+  return kind === 'firefly' ? (env.board?.baseY ?? 0) + env.pieceTop + 0.6 : Infinity;
+}
+
+/** Punkt → Brett-Koordinaten (Ursprung Brettmitte, Achsen entlang der Brettkanten). */
+function toBoard(env: InsectEnv, x: number, z: number): { bx: number; bz: number } {
+  const b = env.board ?? { x: env.center.x, z: env.center.z, yaw: 0, baseY: 0 };
+  const dx = x - b.x;
+  const dz = z - b.z;
+  const c = Math.cos(b.yaw);
+  const s = Math.sin(b.yaw);
+  return { bx: dx * c - dz * s, bz: dx * s + dz * c };
+}
+
+function fromBoard(env: InsectEnv, bx: number, bz: number): { x: number; z: number } {
+  const b = env.board ?? { x: env.center.x, z: env.center.z, yaw: 0, baseY: 0 };
+  const c = Math.cos(b.yaw);
+  const s = Math.sin(b.yaw);
+  return { x: b.x + bx * c + bz * s, z: b.z - bx * s + bz * c };
 }
 
 export function createAgents(counts: Record<InsectKind, number>, env: InsectEnv, rng: () => number): Agent[] {
@@ -128,7 +147,7 @@ export function stepAgents(agents: Agent[], env: InsectEnv, dt: number, rng: () 
         else if (a.timer <= 0) {
           // jedes fünfte Glühwürmchen schwebt gelegentlich hoch über das Brett
           a.target = idx % 5 === 0 && rng() < 0.3
-            ? { x: env.center.x + (rng() - 0.5) * env.boardHalf, y: boardCeiling('firefly', env) + 0.2 + rng() * 0.6, z: env.center.z + (rng() - 0.5) * env.boardHalf }
+            ? { ...fromBoard(env, (rng() - 0.5) * env.boardHalf, (rng() - 0.5) * env.boardHalf), y: boardCeiling('firefly', env) + 0.2 + rng() * 0.6 }
             : env.wallPoint(rng, 0.4, 2.6);
           a.timer = 4 + rng() * 6;
         }
@@ -225,8 +244,7 @@ export function stepAgents(agents: Agent[], env: InsectEnv, dt: number, rng: () 
       if (a.v.y < 0) a.v.y *= -0.3;
     }
     // 2. Brettraum
-    const bx = a.p.x - env.center.x;
-    const bz = a.p.z - env.center.z;
+    const { bx, bz } = toBoard(env, a.p.x, a.p.z);
     if (Math.abs(bx) < env.boardHalf && Math.abs(bz) < env.boardHalf) {
       const ceil = boardCeiling(a.kind, env);
       if (Number.isFinite(ceil)) {
@@ -236,12 +254,21 @@ export function stepAgents(agents: Agent[], env: InsectEnv, dt: number, rng: () 
         }
       } else {
         // zur nächsten Brettkante hinausschieben
-        if (env.boardHalf - Math.abs(bx) < env.boardHalf - Math.abs(bz)) {
-          a.p.x = env.center.x + Math.sign(bx || 1) * env.boardHalf;
-          a.v.x = Math.abs(a.v.x) * Math.sign(bx || 1);
-        } else {
-          a.p.z = env.center.z + Math.sign(bz || 1) * env.boardHalf;
-          a.v.z = Math.abs(a.v.z) * Math.sign(bz || 1);
+        // Nicht-Glühwürmchen nie über dem Brett (in keiner Höhe) → seitlich hinausschieben
+        {
+          const out = env.boardHalf - Math.abs(bx) < env.boardHalf - Math.abs(bz)
+            ? fromBoard(env, Math.sign(bx || 1) * env.boardHalf, bz)
+            : fromBoard(env, bx, Math.sign(bz || 1) * env.boardHalf);
+          const nx = out.x - a.p.x;
+          const nz = out.z - a.p.z;
+          a.p.x = out.x;
+          a.p.z = out.z;
+          const nl = Math.hypot(nx, nz) || 1;
+          const vn = (a.v.x * nx + a.v.z * nz) / nl;
+          if (vn < 0) {
+            a.v.x -= (nx / nl) * vn * 2;
+            a.v.z -= (nz / nl) * vn * 2;
+          }
         }
         if (a.kind === 'dragonfly' || a.kind === 'firefly') a.timer = 0;
       }

@@ -1,0 +1,81 @@
+import { settings } from '../core/settings';
+
+const de = {
+  enterVR: 'VR betreten',
+  enterVRHint: 'Setz die Brille auf und tippe auf „VR betreten“. Richte vorher die Spielfläche (Guardian) ein.',
+  exitVR: 'VR verlassen',
+  vrFailed: 'VR konnte nicht gestartet werden: {err}',
+  placedRoom: 'Brett steht: Feld {cm} cm, König {kcm} cm. Geh zu deinen Figuren – greif den leuchtenden Punkt oben.',
+  placedSmall: 'Tischmodus: Deine Spielfläche ist zu klein für Riesenschach (Feld unter 20 cm).',
+  placedSeated: 'Sitzmodus: Brett in Tischgröße vor dir.',
+  setupTitle: 'Keine Spielfläche gefunden',
+  setupBody: 'Tippe die {n} Ecken deiner freien Fläche nacheinander auf dem Boden an\n(Controllerspitze bzw. Pinch nah am Boden). Ecke {i} von {n}.',
+  setupSeated: 'Sitzmodus',
+  setupRestart: 'Neu beginnen',
+  reset: 'Tracking wurde neu zentriert – das Brett wurde neu ausgerichtet.',
+  resetLocal: 'Tracking wurde neu zentriert. Bitte die Spielfläche neu einrichten.',
+  menuTitle: 'Menü',
+  menuHintHand: 'Menü: Blick auf die linke Handfläche',
+  menuHintController: 'Menü: Taste Y (links)',
+  mResign: 'Aufgeben',
+  mDraw: 'Remis anbieten',
+  mUndo: 'Zug zurück',
+  mBoundary: 'Boundary anzeigen',
+  mRealign: 'Brett neu ausrichten',
+  mSeated: 'Sitzmodus an/aus',
+  mSmaller: 'Brett kleiner',
+  mBigger: 'Brett größer',
+  mInsects: 'Insekten an/aus',
+  mCoords: 'Koordinaten S/M/L',
+  mRematch: 'Revanche',
+  mNew: 'Neue Partie',
+  mExit: 'VR verlassen',
+  confirmResign: 'Zum Aufgeben nochmal tippen',
+  confirmDraw: 'Remis: nochmal tippen (beide einverstanden?)',
+  gameOverHint: 'Partie vorbei – im Menü: Revanche oder neue Partie',
+  boundaryNear: 'Achtung: Grenze der Spielfläche',
+};
+
+export type VRKey = keyof typeof de;
+
+const en: Record<VRKey, string> = {
+  enterVR: 'Enter VR',
+  enterVRHint: 'Put on the headset and tap “Enter VR”. Set up your play area (guardian) first.',
+  exitVR: 'Exit VR',
+  vrFailed: 'Could not start VR: {err}',
+  placedRoom: 'Board placed: squares {cm} cm, king {kcm} cm. Walk to your pieces – grab the glowing dot on top.',
+  placedSmall: 'Table mode: your play area is too small for giant chess (squares below 20 cm).',
+  placedSeated: 'Seated mode: table-sized board in front of you.',
+  setupTitle: 'No play area found',
+  setupBody: 'Tap the {n} corners of your free area on the floor, one after another\n(controller tip or pinch close to the floor). Corner {i} of {n}.',
+  setupSeated: 'Seated mode',
+  setupRestart: 'Start over',
+  reset: 'Tracking was recentred – the board has been realigned.',
+  resetLocal: 'Tracking was recentred. Please set up the play area again.',
+  menuTitle: 'Menu',
+  menuHintHand: 'Menu: look at your left palm',
+  menuHintController: 'Menu: Y button (left)',
+  mResign: 'Resign',
+  mDraw: 'Offer draw',
+  mUndo: 'Take back',
+  mBoundary: 'Show boundary',
+  mRealign: 'Realign board',
+  mSeated: 'Seated mode on/off',
+  mSmaller: 'Smaller board',
+  mBigger: 'Bigger board',
+  mInsects: 'Insects on/off',
+  mCoords: 'Coordinates S/M/L',
+  mRematch: 'Rematch',
+  mNew: 'New game',
+  mExit: 'Exit VR',
+  confirmResign: 'Tap again to resign',
+  confirmDraw: 'Draw: tap again (both agree?)',
+  gameOverHint: 'Game over – menu: rematch or new game',
+  boundaryNear: 'Careful: edge of the play area',
+};
+
+export function V(key: VRKey, params: Record<string, string | number> = {}): string {
+  let s = (settings.get().lang === 'en' ? en : de)[key];
+  for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, String(v));
+  return s;
+}

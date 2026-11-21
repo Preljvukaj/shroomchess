@@ -84,6 +84,23 @@ Allgemein:
 | Menü | `Esc` oder ☰ |
 | Analysebrett | Am Partieende → Analysebrett, dann ◀ ▶ bzw. Pfeiltasten, Pos1/Ende |
 
+### Bedienung in VR
+
+| Aktion | Controller | Hände |
+|---|---|---|
+| VR starten | Im Spiel „VR betreten“ antippen (von der Landingpage: „In VR starten“) | |
+| Figur ziehen | Mit der Controllerspitze an den leuchtenden Griffpunkt, Trigger oder Grip halten, zum Feld tragen, loslassen | Daumen und Zeigefinger am Griffpunkt zusammenführen (Pinch), tragen, öffnen |
+| Umwandlung | Mini-Figur antippen + Trigger | Mini-Figur pinchen |
+| Menü | Taste **Y** (linker Controller) | **Blick auf die linke Handfläche** |
+| Menüknopf | Mit der rechten Controllerspitze antippen + Trigger | Mit dem rechten Zeigefinger antippen |
+| Aufgeben / Remis | im Menü zweimal tippen | |
+
+Ohne eingerichtete Spielfläche fragt das Spiel nach den 4 Ecken deiner freien Fläche (auf dem Boden antippen).
+Linkshänder-Option: Menü an der rechten Hand.
+
+**Testen ohne Brille:** `…/?autostart=engine&xremu=1&bounds=4x3` simuliert eine Quest 3 (Metas IWER). `&hands=1` für
+Handtracking. Ohne `bounds` startet die manuelle Flächeneinrichtung. Steuerung in der Konsole über `window.__myzelXR`.
+
 ### Einstellungen im Spielmenü
 
 Sprache · Qualität · Farbenblind-Palette · Figuren ohne legalen Zug markieren · Untertitel · Lautstärke ·
@@ -138,5 +155,6 @@ docs/         ARCHITECTURE.md, LICHESS_FEASIBILITY.md, TESTING_TWO_HEADSETS.md
 - Remis-Angebot gegen Stockfish wird immer abgelehnt (keine Bewertungslogik).
 - Hot-Seat dreht die Kamera nicht automatisch zum Spieler am Zug (manuell mit `F`).
 - Rücknahme setzt die Uhr nicht zurück.
-- Schachuhr ist nur im 2D-Overlay. Die schwebende 3D-Uhr am Brettrand kommt mit M2 (wird in VR gebraucht).
-- „In VR starten“ ist bis Meilenstein 2 deaktiviert (VR-Erkennung läuft bereits).
+- VR noch nicht auf echter Quest-Hardware getestet (Bildrate, Tracking, Haptik, Lesbarkeit der Tafeln).
+- Teleport (optionale Komfortfunktion) noch nicht umgesetzt (Roomscale ist der Standard).
+- Das Handgelenk-Menü ist funktional, aber noch schlicht. Einstellungen wie Qualität und Sprache gibt es nur am Desktop.

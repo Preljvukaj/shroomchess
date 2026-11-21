@@ -16,6 +16,8 @@ export interface World {
   celebrate(color: THREE.Color | null): void;
   resetTint(): void;
   update(dt: number): void;
+  tintState(): number;
+  restoreTint(target: number): void;
 }
 
 /**
@@ -46,6 +48,12 @@ export function createWorld(profile: QualityProfile, region: FlatRegion): World 
     },
     resetTint() {
       target = 0;
+    },
+    tintState() {
+      return target;
+    },
+    restoreTint(t) {
+      target = t;
     },
     update(dt) {
       const u = worldUniforms.uTintAmt;

@@ -176,3 +176,51 @@ Messung nach den Änderungen (Desktop-Ansicht, 1400×850):
 
 Bei Problemen auf der Brille in dieser Reihenfolge reduzieren: Insekten (`insects`) → Pilzdetail
 (`shroomDetail`/`nearShrooms`) → Bloom (auf der Quest ohnehin aus).
+
+## Meilenstein 2 (VR-Einzelspieler)
+
+**D30 – „VR betreten“ als eigener Klick nach dem Laden.** `requestSession` verlangt eine direkte Nutzergeste.
+Zwischen dem Klick auf der Landingpage und der fertig gebauten Szene vergehen auf der Quest einige Sekunden, das kann das
+Aktivierungsfenster des Browsers überschreiten. Deshalb lädt „In VR starten“ zuerst und zeigt dann einen großen Knopf „VR betreten“.
+Derselbe Knopf steht im Desktop-Spiel bereit, das ist der manuelle Moduswechsel.
+
+**D31 – Referenzraum:** Angefordert wird `local-floor` (Pflicht) plus optional `bounded-floor` und `hand-tracking`. Liefert
+`bounded-floor` ≥ 3 Punkte, gilt dieses Polygon als Spielfläche. Sonst richtet der Spieler die Fläche manuell ein, indem er
+4 Ecken mit Controllerspitze oder Pinch nah am Boden antippt. Die Punkte werden per Winkel sortiert, damit das Polygon gültig ist. Die Brett-Platzierung (`xr/math/placement.ts`) dreht
+das Brett unter den vier gleichwertigen Lagen so, dass die eigene Grundreihe zum Spieler zeigt. Ist das Feld kleiner als 20 cm oder der
+Sitzmodus an, steht ein Tischbrett (6-cm-Felder) 45 cm vor dem Spieler (stehend 0,85 m, sitzend 0,62 m).
+
+**D32 – Das Brett wird skaliert statt neu gebaut.** `board.root.scale = Feldgröße / 0,5`. Figuren, Koordinaten,
+Griffpunkte und Schalen skalieren mit, die Spiellogik bleibt in Desktop-Einheiten. Die Greif-Abstände (30/8 cm) skalieren erst unterhalb
+einer Feldgröße von ~0,38 m mit, damit man im Tischmodus nicht die Nachbarfigur erwischt. Welt, Senke und Insekten werden für die
+echte Spielfläche neu gebaut (alte Geometrien werden freigegeben).
+
+**D33 – Nur Nah-Interaktion, kein Laserpointer.** Man geht real zur Figur (Roomscale). Zeiger: Controllerspitze + Trigger
+oder Grip bzw. Pinch-Mitte (Daumen/Zeigefinger, Hysterese 2/4 cm). Die vorhandene Griffpunkt-Logik verarbeitet Punkt-Zeiger
+schon seit M1, sie wurde nicht verändert. Hände und Controller werden als leuchtende Sporen gezeichnet (alle Gelenke in
+1 Draw Call), statt Hand- und Controller-Modelle vom CDN zu laden (spart Ladezeit und ~50 Draw Calls).
+
+**D34 – Diegetische 3D-UI:**
+- Tafeln mit Rankenrand, SDF-Text, nur um die Hochachse zum Spieler gedreht
+- Hinweise folgen dem Blick träge statt als starres Kopf-HUD
+- schwebende Uhr am rechten Brettrand (Weiß-Sicht), für beide Seiten lesbar
+- Handgelenk-Menü am linken Handgelenk (Linkshänder: rechts). Es öffnet beim Blick auf die Handfläche (Handtracking, Normale aus
+  Handgelenk/Zeigefinger-/Kleinfinger-Mittelhand, getestet) oder mit der Taste Y/X. Knöpfe sind Pilzhüte zum Antippen.
+- „Aufgeben“ und „Remis“ brauchen ein zweites Tippen innerhalb von 3 s.
+
+Untertitel laufen in VR über die Hinweis-Tafel.
+
+**D35 – Grenzwarnung:** ein Rankengitter direkt auf der Boundary, vor dem Wall der Senke. Es wird pro Pixel sichtbar, wenn Kopf oder
+Hand näher als 0,4 m kommen. Steht der Kopf sehr nah an der Grenze, gibt es zusätzlich einen Texthinweis. Über das Menü lässt sich das ganze Gitter einblenden.
+Beim `reset`-Event des Referenzraums wird mit `bounded-floor` die Fläche neu gelesen und das Brett neu ausgerichtet. Mit
+`local-floor` startet die manuelle Einrichtung neu.
+
+**D36 – Performance in VR:** Feste Foveation (`setFoveation(1)`), Framebuffer-Skalierung 0,9/1,0/1,2 (Low/Medium/High), kein
+Bloom in XR. Das Handgelenk-Menü kostet ~27 Draw Calls, aber nur solange es offen ist.
+
+**D37 – Debug-Modus ohne Brille: Metas „Immersive Web Emulation Runtime“ (IWER).** Mit `?xremu=1` (optional `&hands=1`,
+`&bounds=4x3`) wird eine Quest 3 mit Controllern bzw. Händen im normalen Browser simuliert. Der Emulator ist ein eigener
+Chunk und wird nur bei diesem Parameter geladen. IWER liefert keine `boundsGeometry`, deshalb kommt die Test-Fläche per Parameter.
+So wurden geprüft: Sitzungsstart, Brett-Platzierung, Zug mit Controller und mit Pinch, manuelle Einrichtung (4 Ecken),
+Menü über Taste Y, Aufgeben mit Doppeltippen, VR verlassen. Nicht ersetzt wird damit der Test auf echter Hardware
+(Tracking, Bildrate, Lesbarkeit, Haptik).

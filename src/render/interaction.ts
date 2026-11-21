@@ -49,6 +49,8 @@ export class InteractionController {
   private raycaster = new THREE.Raycaster();
   private targets: MoveOption[] = [];
   enabled = true;
+  /** Skalierung der Greif-Abstände (Tischmodus: kleines Brett → kleinere Zonen). */
+  distanceScale = 1;
 
   constructor(private scene: BoardScene, private game: ChessGame, private hooks: InteractionHooks) {
     this.outline = new THREE.Mesh(
@@ -118,7 +120,7 @@ export class InteractionController {
         if (ptr.ray) {
           this.raycaster.ray.copy(ptr.ray);
           this.scene.promotion.hoverRay(this.raycaster);
-        } else if (ptr.point) this.scene.promotion.hoverPoint(ptr.point, this.scene.kingHeight * 0.15);
+        } else if (ptr.point) this.scene.promotion.hoverPoint(ptr.point, this.scene.kingHeight * 0.15 * this.scene.root.scale.x);
         if (ptr.pressed && !st.wasPressed) this.scene.promotion.choose();
         st.wasPressed = ptr.pressed;
       }
@@ -185,13 +187,15 @@ export class InteractionController {
 
       // Griffpunkt direkt unter dem Zeiger hat Vorrang (er ist der eigentliche Anfasser),
       // sonst die getroffene Figur, sonst der nächste Griffpunkt in Reichweite.
-      const cand = bestD <= GRAB_DISTANCE ? best : (meshHit ?? (bestD < NEAR_DISTANCE ? best : null));
+      const GRAB = GRAB_DISTANCE * this.distanceScale;
+      const NEAR = NEAR_DISTANCE * this.distanceScale;
+      const cand = bestD <= GRAB ? best : (meshHit ?? (bestD < NEAR ? best : null));
       if (cand) {
-        const d = cand === best && bestD <= GRAB_DISTANCE ? bestD : meshHit === cand ? 0 : bestD;
-        const prox = THREE.MathUtils.clamp(1 - d / NEAR_DISTANCE, 0, 1);
+        const d = cand === best && bestD <= GRAB ? bestD : meshHit === cand ? 0 : bestD;
+        const prox = THREE.MathUtils.clamp(1 - d / NEAR, 0, 1);
         cand.proximity = Math.max(cand.proximity, prox);
         if (!this.isMovable(cand)) cand.state = 'blocked';
-        else if (d <= GRAB_DISTANCE) cand.state = 'grabbable';
+        else if (d <= GRAB) cand.state = 'grabbable';
         else if (cand.state !== 'grabbable') cand.state = 'near';
         if (cand.state === 'grabbable') {
           outlineTarget = cand;

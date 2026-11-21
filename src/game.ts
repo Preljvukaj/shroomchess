@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AudioEngine } from './audio/audio';
-import { ChessClock, TIME_CONTROLS } from './core/clock';
+import { ChessClock, TIME_CONTROLS, formatClock } from './core/clock';
 import type { GameConfig } from './core/config';
 import { ChessGame } from './core/game';
 import { type Quality, effectiveQuality, settings } from './core/settings';
@@ -16,6 +16,21 @@ import { InteractionController } from './render/interaction';
 import { PLAYER_GLOW } from './render/pieces';
 import { SceneContext } from './render/scene';
 import { createWorld, squareRegion } from './render/world';
+import { squarePolygon } from './render/world/basin';
+import type { V2 } from './xr/math/vec2';
+import { V } from './xr/strings';
+import { VRMode } from './xr/vrMode';
+
+function disposeObject(root: THREE.Object3D): void {
+  root.removeFromParent();
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    m.geometry?.dispose();
+    const mat = m.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+    else mat?.dispose?.();
+  });
+}
 import { createInsects } from './render/world/insects';
 import { colorName, t } from './ui/i18n';
 import { Overlay, resultText } from './ui/overlay';
@@ -48,7 +63,8 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
   // Desktop: virtuelle Spielfläche = Brett + 2,5 m Rand (Platz für die Kamera).
   // In VR (M2) kommt hier die Boundary des Hosts hinein.
   const flatHalf = side / 2 + 2.5;
-  const world = createWorld(ctx.profile, squareRegion(flatHalf));
+  let vr: VRMode | null = null; // früh deklarieren: die Frame-Schleife läuft schon während der Initialisierung
+  let world = createWorld(ctx.profile, squareRegion(flatHalf));
   ctx.scene.add(world.root);
 
   const game = new ChessGame();
@@ -88,11 +104,36 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
   let viewSide: Color = isEngine ? human : 'w';
   controls.resetView(viewSide);
 
-  const insects = createInsects(ctx.profile, world, audio, {
+  let insects = createInsects(ctx.profile, world, audio, {
     boardHalf: side / 2 + DESKTOP_SQUARE * 0.8,
     pieceTop: board.kingHeight * 1.15,
   });
   ctx.scene.add(insects.root);
+
+  /**
+   * Welt (Senke, Vegetation) und Insekten für eine neue Spielfläche neu bauen und das Brett
+   * dort platzieren (VR: Boundary des Spielers; zurück am Desktop: virtuelle Fläche).
+   */
+  function rebuildWorld(region: V2[], pose: { x: number; z: number; yaw: number; height: number; squareSize: number }): void {
+    const k = pose.squareSize / DESKTOP_SQUARE;
+    board.root.position.set(pose.x, pose.height, pose.z);
+    board.root.rotation.set(0, pose.yaw, 0);
+    board.root.scale.setScalar(k);
+    interaction.distanceScale = THREE.MathUtils.clamp(k * 1.3, 0.2, 1);
+    const tint = world.tintState();
+    disposeObject(world.root);
+    insects.dispose();
+    world = createWorld(ctx.profile, { pts: region });
+    world.restoreTint(tint);
+    ctx.scene.add(world.root);
+    insects = createInsects(ctx.profile, world, audio, {
+      boardHalf: (side / 2 + DESKTOP_SQUARE * 0.8) * k,
+      pieceTop: board.kingHeight * 1.15 * k,
+      pose: { x: pose.x, z: pose.z, yaw: pose.yaw, baseY: pose.height },
+    });
+    ctx.scene.add(insects.root);
+    applySettings();
+  }
 
   // ---------- Lichess ----------
   let lichess: LichessBoard | null = null;
@@ -100,7 +141,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
 
   const interaction = new InteractionController(board, game, {
     canControl,
-    viewerYaw: () => controls.viewYaw(),
+    viewerYaw: () => (vr?.active ? vr.viewerYawOnBoard() : controls.viewYaw()),
     submitMove: (from, to, promo) => {
       const m = game.tryMove(from, to, promo);
       if (m && lichess) void lichess.sendMove(from + to + (m.promotion ?? ''));
@@ -213,7 +254,12 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
   overlay.names = names;
   overlay.setHint(t('hintDesktop'));
   overlay.onRerender = () => refreshUi();
-  audio.onSubtitle = (k) => overlay.subtitle(k);
+  let subtitleSink: ((text: string) => void) | null = null;
+  audio.onSubtitle = (k) => {
+    if (subtitleSink) {
+      if (settings.get().subtitles) subtitleSink(t(k));
+    } else overlay.subtitle(k);
+  };
 
   function applySettings(): void {
     const s = settings.get();
@@ -262,6 +308,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     setTimeout(() => audio.play('end'), 400);
     refreshUi();
     setTimeout(() => overlay.showEnd(r), 1600);
+    if (vr?.active) setTimeout(() => vr?.say(`${resultText(r)}\n${V('gameOverHint')}`, 8), 1200);
   });
   const bindClock = () => clock.on('flag', (c) => !lichess && game.timeout(c));
   bindClock();
@@ -354,11 +401,15 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
   const fwd = new THREE.Vector3();
   const up = new THREE.Vector3();
   ctx.onFrame((dt, time) => {
-    controls.update(dt);
-    if (!analysisOn) {
-      const snaps = controls.drainSnapshots();
-      if (snaps.length === 0) interaction.update([]);
-      for (const s of snaps) interaction.update([s.pointer], s.screen);
+    if (vr?.active) {
+      vr.update(dt, time);
+    } else {
+      controls.update(dt);
+      if (!analysisOn) {
+        const snaps = controls.drainSnapshots();
+        if (snaps.length === 0) interaction.update([]);
+        for (const s of snaps) interaction.update([s.pointer], s.screen);
+      }
     }
     board.update(dt, time);
     board.root.getWorldPosition(boardCenter);
@@ -368,7 +419,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     ctx.camera.getWorldDirection(fwd);
     up.set(0, 1, 0).applyQuaternion(ctx.camera.getWorldQuaternion(new THREE.Quaternion()));
     audio.setListener(head, fwd, up);
-    insects.update(dt, time, head, fwd, []);
+    insects.update(dt, time, head, fwd, vr?.active ? vr.handPoints() : []);
     uiTimer += dt;
     if (uiTimer > 0.1) {
       uiTimer = 0;
@@ -376,11 +427,101 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     }
   });
 
+  // ---------- VR (Meilenstein 2) ----------
+  if (await VRMode.supported()) {
+    vr = new VRMode({
+      renderer: ctx.renderer,
+      scene: ctx.scene,
+      rig: ctx.rig,
+      camera: ctx.camera,
+      quality,
+      interaction,
+      boardRoot: board.root,
+      boardHalfLocal: side / 2 + DESKTOP_SQUARE * 0.8,
+      localSquare: DESKTOP_SQUARE,
+      // Hot-Seat: Seite am Zug; gegen Engine/Lichess: eigene Farbe
+      playerColor: () => (isEngine || isLichess ? human : game.turn),
+      applyPlacement: (p, region) => rebuildWorld(region, { x: p.center.x, z: p.center.z, yaw: p.yaw, height: p.height, squareSize: p.squareSize }),
+      onExit: () => {
+        rebuildWorld(squarePolygon(flatHalf), { x: 0, z: 0, yaw: 0, height: 0, squareSize: DESKTOP_SQUARE });
+        controls.setMode(controls.mode, viewSide);
+        vrButton.hidden = false;
+      },
+      clockText: () => {
+        const st = clock.enabled ? clock.read() : null;
+        const line = (c: Color) => `${game.turn === c && !game.result() ? '▶ ' : ''}${names[c]}${st ? `   ${formatClock(st[c])}` : ''}`;
+        const r = game.result();
+        return `${line('b')}\n${line('w')}${r ? `\n${resultText(r)}` : game.inCheck ? `\n${t('check')}` : ''}`;
+      },
+      isGameOver: () => !!game.result(),
+      action: (id) => vrAction(id),
+      setSubtitleSink: (fn) => (subtitleSink = fn),
+    });
+  }
+
+  /** Aktionen aus dem VR-Handgelenk-Menü (Bestätigung passiert dort per Doppeltippen). */
+  function vrAction(id: string): void {
+    switch (id) {
+      case 'resign':
+        if (game.result()) return;
+        if (lichess) void lichess.resign();
+        else game.resign(isEngine ? human : game.turn);
+        return;
+      case 'draw':
+        if (game.result()) return;
+        if (lichess) void lichess.offerDraw(true);
+        else if (isEngine) vr?.say(t('drawDeclined'), 3);
+        else game.agreeDraw(); // Hot-Seat: beide stehen an derselben Brille
+        return;
+      case 'undo':
+        if (lichess) return vr?.say(t('notInLichess'), 3);
+        if (board.busy) return;
+        engine?.stop();
+        interaction.cancelAll();
+        game.undo();
+        if (isEngine && game.turn !== human) game.undo();
+        return;
+      case 'rematch':
+        if (lichess) return vr?.say(t('notInLichess'), 3);
+        newRound();
+        return;
+      case 'new':
+        vr?.exit();
+        location.href = location.pathname;
+        return;
+    }
+  }
+
+  // Knopf „VR betreten“ (requestSession braucht eine direkte Nutzergeste)
+  const vrButton = document.createElement('button');
+  vrButton.className = 'vr-enter';
+  vrButton.textContent = `🥽 ${V('enterVR')}`;
+  vrButton.hidden = !vr;
+  vrButton.addEventListener('click', async () => {
+    if (!vr) return;
+    vrHint.hidden = true;
+    try {
+      audio.start();
+      await vr.enter();
+      vrButton.hidden = true;
+      controls.enabled = false;
+    } catch (e) {
+      overlay.toast(V('vrFailed', { err: (e as Error).message }), 8000);
+    }
+  });
+  ui.appendChild(vrButton);
+  const vrHint = document.createElement('div');
+  vrHint.className = 'vr-hint';
+  vrHint.textContent = V('enterVRHint');
+  vrHint.hidden = !(vr && cfg.vr);
+  if (vr && cfg.vr) vrButton.classList.add('big');
+  ui.appendChild(vrHint);
+
   refreshUi();
   if (game.plyCount > 0 && !game.result() && !isLichess) clock.start(game.turn);
   void maybeEngineMove();
   requestAnimationFrame(() => loading.remove());
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as Record<string, unknown>).myzel = { game, board, ctx, THREE, interaction, controls, world, insects, audio };
+  (window as unknown as Record<string, unknown>).myzel = { game, board, ctx, THREE, interaction, controls, get world() { return world; }, get insects() { return insects; }, audio, vr };
 }

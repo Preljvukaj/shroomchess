@@ -17,6 +17,11 @@ async function boot(): Promise<void> {
   const app = document.getElementById('app')!;
   const ui = document.getElementById('ui')!;
   const route = parseRoute(location.search);
+  const params = new URLSearchParams(location.search);
+  if (params.get('xremu') === '1') {
+    const { installEmulator } = await import('./xr/emulator');
+    await installEmulator(params);
+  }
   const vrSupported = await isVRSupported();
 
   // Fortsetzen nach Qualitätswechsel (Neuladen)

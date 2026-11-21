@@ -14,6 +14,7 @@ import { type Agent, type InsectEnv, type InsectKind, MIN_HEAD_DIST, createAgent
 
 export interface Insects {
   root: THREE.Group;
+  dispose(): void;
   setEnabled(on: boolean, landing: boolean): void;
   /** `hands`: Positionen ruhig gehaltener Hände (VR) für das Lande-Easter-Egg. */
   update(dt: number, time: number, head: THREE.Vector3, fwd: THREE.Vector3, hands: THREE.Vector3[]): void;
@@ -145,7 +146,12 @@ function createGlowPoints(count: number): { mesh: THREE.Mesh; pos: Float32Array;
   return { mesh, pos, attr, size, color };
 }
 
-export function createInsects(profile: QualityProfile, world: World, audio: AudioEngine, board: { boardHalf: number; pieceTop: number }): Insects {
+export function createInsects(
+  profile: QualityProfile,
+  world: World,
+  audio: AudioEngine,
+  board: { boardHalf: number; pieceTop: number; pose?: { x: number; z: number; yaw: number; baseY: number } },
+): Insects {
   const root = new THREE.Group();
   root.name = 'insects';
   const rng = mulberry32(99);
@@ -177,6 +183,7 @@ export function createInsects(profile: QualityProfile, world: World, audio: Audi
     maxRadius: rimR + 1.5,
     boardHalf: board.boardHalf,
     pieceTop: board.pieceTop,
+    board: board.pose,
     attractors: world.attractors.map((a) => ({ x: a.x, y: a.y, z: a.z })),
     swarmCenters: Array.from({ length: Math.max(1, Math.round(counts.midge / 14)) }, () => ({ x: 0, y: 0, z: 0 })),
     landing: null,
@@ -242,6 +249,14 @@ export function createInsects(profile: QualityProfile, world: World, audio: Audi
 
   return {
     root,
+    dispose() {
+      root.removeFromParent();
+      root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        m.geometry?.dispose();
+        (m.material as THREE.Material | undefined)?.dispose?.();
+      });
+    },
     setEnabled(on, landing) {
       enabled = on;
       landingOn = landing;

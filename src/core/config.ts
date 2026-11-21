@@ -23,5 +23,5 @@ export interface GameConfig {
 /** Diese Modi haben bereits eine spielbare Umsetzung. */
 export const PLAYABLE_MODES: GameMode[] = ['hotseat', 'engine', 'lichess'];
 
-/** VR-Spielmodus (Meilenstein 2) – bis dahin bleibt „In VR starten“ gesperrt. */
-export const VR_GAMEPLAY_AVAILABLE = false;
+/** VR-Spielmodus (Meilenstein 2) ist verfügbar. */
+export const VR_GAMEPLAY_AVAILABLE = true;

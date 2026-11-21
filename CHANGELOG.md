@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0 – Meilenstein 2: VR-Einzelspieler
+
+### Neu
+- **VR-Modus**: Knopf „VR betreten“ im Spiel (bei VR-fähigen Geräten; von der Landingpage über „In VR starten“).
+  Foveated Rendering, Framebuffer-Skalierung je Qualitätsstufe.
+- **Spielfläche**: Boundary (`bounded-floor`) wird gelesen, das Brett automatisch so groß wie möglich (0,5 m Abstand, Feld ≤ 0,6 m)
+  platziert und gedreht, sodass die eigene Grundreihe zu dir zeigt. Die Senke wird um deine echte Spielfläche gebaut.
+  Ohne Boundary: 4 Ecken auf dem Boden antippen. Ist der Raum zu klein oder der Sitzmodus an, gibt es ein Tischbrett vor dir.
+- **Greifen** mit Controller (Trigger/Grip) und Handtracking (Pinch), mit Haptik. Hände und Controller erscheinen als leuchtende Sporen.
+- **3D-Oberfläche**:
+  - schwebende Schachuhr am Brettrand
+  - Hinweis-Tafel (auch Untertitel)
+  - Handgelenk-Menü (Blick auf die linke Handfläche oder Taste Y) mit Aufgeben, Remis, Zug zurück, Boundary anzeigen,
+    Brett neu ausrichten, Sitzmodus, Brett kleiner/größer, Insekten, Koordinatengröße, Revanche, Neue Partie, VR verlassen
+- **Grenzwarnung**: Rankengitter erscheint unter 0,4 m Abstand zur Boundary.
+- **Tracking-Reset** wird erkannt, das Brett neu ausgerichtet bzw. die Einrichtung neu gestartet.
+- **Debug-Modus** `?xremu=1` (IWER-Emulator), siehe README.
+
+### Tests
+66 Unit-Tests (vorher 55): Brett-Platzierung (Roomscale, Tisch, Sitzmodus, manuelle Größe), Eckensortierung,
+Handflächen-Erkennung, Insekten bei verschobenem/gedrehtem Brett.
+
+
 ## 0.2.0 – Landingpage, Senke, neue Pilze, lesbare Koordinaten, Insekten
 
 ### Neu

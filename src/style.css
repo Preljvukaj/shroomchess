@@ -95,3 +95,11 @@ select, input[type=text], input:not([type]) {
   .moves-wrap { max-height: 18vh; }
   .hint { display: none; }
 }
+
+/* VR betreten */
+.vr-enter { position: fixed; left: 12px; bottom: 56px; min-height: 48px; padding: 0.7em 1.2em; font-size: 1rem;
+  background: linear-gradient(180deg, #1de9c9, #8b3dff); color: #05030d; font-weight: 700; border: none; }
+.vr-enter.big { left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -50%); font-size: 1.6rem; padding: 0.9em 1.8em;
+  box-shadow: 0 0 40px rgba(77, 255, 240, 0.6); z-index: 5; }
+.vr-hint { position: fixed; left: 50%; top: calc(50% + 70px); transform: translateX(-50%); max-width: min(520px, 90vw);
+  text-align: center; color: var(--ink); background: rgba(5, 3, 13, 0.75); padding: 10px 14px; border-radius: 12px; z-index: 5; }
