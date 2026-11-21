@@ -9,7 +9,7 @@ import { CaptureBowl } from './captureBowl';
 import { Effects } from './effects';
 import { Highlights } from './highlights';
 import { PieceView } from './pieceView';
-import { KING_HEIGHT_PER_SQUARE, PLAYER_GLOW } from './pieces';
+import { KING_HEIGHT_PER_SQUARE, PLAYER_GLOW, applyRim } from './pieces';
 import { PromotionPicker } from './promotion';
 
 export interface BoardSceneOptions {
@@ -210,6 +210,7 @@ export class BoardScene {
       if (m.promotion && mover) {
         mover.setType(m.promotion, this.opts.segments);
         const mat = (mover.mesh.material as THREE.MeshPhysicalMaterial).clone();
+        applyRim(mat, mover.color); // Klonen übernimmt den Shader-Hook nicht
         mover.mesh.material = mat;
         const e0 = mat.emissive.clone();
         const glow = PLAYER_GLOW[mover.color];

@@ -12,8 +12,7 @@ import { GRIP_HEIGHT, PLAYER_GLOW, pieceGeometry, pieceMaterials } from './piece
  */
 export type GripState = 'idle' | 'near' | 'grabbable' | 'blocked' | 'held' | 'nomoves';
 
-export const NEAR_DISTANCE = 0.3;
-export const GRAB_DISTANCE = 0.08;
+// Abstände für Annäherung/Greifen: siehe grab.ts (grabConfig, mit Hysterese)
 
 
 export class PieceView {
@@ -32,6 +31,8 @@ export class PieceView {
   state: GripState = 'idle';
   /** 0..1 Nähe der Hand (1 = berührt). */
   proximity = 0;
+  /** Kurzes Aufleuchten beim Greifen (1 → 0). */
+  flash = 0;
   readonly height: number;
 
   constructor(
@@ -108,6 +109,13 @@ export class PieceView {
         break;
       default:
         break;
+    }
+    if (this.flash > 0) {
+      // Snap-Feedback: Griffpunkt leuchtet kurz kräftig auf
+      halo = Math.max(halo, this.flash);
+      opacity = 1;
+      scale *= 1 + 0.6 * this.flash;
+      this.flash = Math.max(0, this.flash - 0.07);
     }
     this.gripColor.copy(col);
     this.gripOpacity = opacity;

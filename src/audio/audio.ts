@@ -1,4 +1,5 @@
 import type { I18nKey } from '../ui/i18n';
+import { BED_SAMPLE_RATE, type CreatureCategory, chorusIntensity, generateBedLoop, recipesFor } from './insectSounds';
 
 /**
  * Prozeduraler Klang mit Web Audio – keine Audio-Assets nötig (Ladezeit!).
@@ -6,7 +7,7 @@ import type { I18nKey } from '../ui/i18n';
  *           aus wechselnden Richtungen (PannerNode → räumlich in VR).
  *  Effekte: Zug, Schlag, Schach, ungültig, Spielende – jeweils mit Untertitel-Schlüssel.
  */
-export type Sfx = 'move' | 'capture' | 'check' | 'illegal' | 'end';
+export type Sfx = 'move' | 'capture' | 'check' | 'illegal' | 'end' | 'pickup';
 
 export class AudioEngine {
   private ctx: AudioContext | null = null;
@@ -16,9 +17,15 @@ export class AudioEngine {
   private insectGain!: GainNode;
   private creaturesVolume = 0.6;
   private insectsOn = true;
-  /** Pool räumlicher Quellen (max. 5 Panner, max. 3 Insektengeräusche gleichzeitig). */
+  /** Pool räumlicher Quellen (8 Panner, max. 6 Insektengeräusche gleichzeitig). */
   private pool: { panner: PannerNode; busyUntil: number; getPos: (() => { x: number; y: number; z: number }) | null }[] = [];
-  static readonly MAX_CREATURE_VOICES = 3;
+  static readonly MAX_CREATURE_VOICES = 6;
+  static readonly POOL_SIZE = 8;
+  /** Ambient-Bed (Insekten-Klangfläche) – hängt am Insekten-Bus. */
+  private bedGain: GainNode | null = null;
+  private shortNoise: AudioBuffer | null = null;
+  private lastIntensityUpdate = -10;
+  private duckUntil = 0;
   private callTimer = 0;
   private volume = 0.7;
   muted = false;
@@ -43,14 +50,14 @@ export class AudioEngine {
     this.insectGain = this.ctx.createGain();
     this.insectGain.gain.value = this.insectsOn ? 1 : 0;
     this.insectGain.connect(this.ambientGain);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < AudioEngine.POOL_SIZE; i++) {
       const panner = this.ctx.createPanner();
       panner.panningModel = 'HRTF';
       panner.distanceModel = 'inverse';
       panner.refDistance = 1;
       panner.rolloffFactor = 1.3;
       panner.maxDistance = 30;
-      panner.connect(this.ambientGain);
+      panner.connect(this.insectGain); // Einzelgeräusche über den Insekten-Bus (Schalter „Insekten aus“)
       this.pool.push({ panner, busyUntil: 0, getPos: null });
     }
     this.buildAmbient();
@@ -102,35 +109,30 @@ export class AudioEngine {
     wind.start();
     lfo.start();
 
-    // Insekten-Zirpen: hohes Bandpass-Rauschen, amplitudenmoduliert
-    const ins = ctx.createBufferSource();
-    ins.buffer = this.noiseBuffer(3);
-    ins.loop = true;
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = 5200;
-    bp.Q.value = 8;
-    const am = ctx.createGain();
-    am.gain.value = 0;
-    const amOsc = ctx.createOscillator();
-    amOsc.frequency.value = 23;
-    const amDepth = ctx.createGain();
-    amDepth.gain.value = 0.04;
-    amOsc.connect(amDepth).connect(am.gain);
-    // Zirp-Teppich läuft über den Insekten-Bus und setzt immer wieder aus („ab und an“)
-    const gate = ctx.createGain();
-    gate.gain.value = 0;
-    ins.connect(bp).connect(am).connect(gate).connect(this.insectGain);
-    ins.start();
-    amOsc.start();
-    const toggle = () => {
-      if (!this.ctx) return;
-      const t = this.ctx.currentTime;
-      const on = gate.gain.value < 0.5;
-      gate.gain.setTargetAtTime(on ? 0.8 : 0, t, 1.5);
-      window.setTimeout(toggle, (on ? 4000 + Math.random() * 6000 : 6000 + Math.random() * 12000));
-    };
-    window.setTimeout(toggle, 3000);
+    // Insekten-Klangfläche (Ambient-Bed): drei nahtlose Stereo-Loops unterschiedlicher Länge,
+    // nacheinander erzeugt (je ein Schritt pro Tick → kein Ruckeln beim Start)
+    this.bedGain = ctx.createGain();
+    this.bedGain.gain.value = 0;
+    this.bedGain.connect(this.insectGain);
+    this.shortNoise = this.noiseBuffer(2);
+    const loops: ['crickets' | 'hum' | 'trills', number, number][] = [['crickets', 64, 0.9], ['hum', 23, 0.8], ['trills', 37, 0.7]];
+    loops.forEach(([kind, sec, gain], i) => {
+      window.setTimeout(() => {
+        if (!this.ctx || !this.bedGain) return;
+        const loop = generateBedLoop(kind, sec, 11 + i);
+        const buf = this.ctx.createBuffer(2, loop.left.length, BED_SAMPLE_RATE);
+        buf.copyToChannel(loop.left as Float32Array<ArrayBuffer>, 0);
+        buf.copyToChannel(loop.right as Float32Array<ArrayBuffer>, 1);
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        const g = this.ctx.createGain();
+        g.gain.value = gain;
+        src.connect(g).connect(this.bedGain);
+        src.start(this.ctx.currentTime + 0.05, Math.random() * sec);
+        if (i === 0) this.bedGain.gain.setTargetAtTime(0.9, this.ctx.currentTime, 2);
+      }, 400 + i * 350);
+    });
 
     // Tiefes Brummen: zwei leicht verstimmte Sinus + Oberton
     for (const [f, g] of [[48, 0.12], [48.7, 0.1], [96.3, 0.03]] as const) {
@@ -205,6 +207,7 @@ export class AudioEngine {
       l.setPosition(pos.x, pos.y, pos.z);
       l.setOrientation(fwd.x, fwd.y, fwd.z, up.x, up.y, up.z);
     }
+    this.updateDynamics();
     for (const v of this.pool) {
       if (!v.getPos || v.busyUntil < ctx.currentTime) continue;
       const p = v.getPos();
@@ -223,19 +226,50 @@ export class AudioEngine {
     this.insectGain.gain.setTargetAtTime(insectsOn ? 1 : 0, this.ctx.currentTime, 0.2);
   }
 
-  /**
-   * Räumliches Tiergeräusch an einer (bewegten) Position. Nutzt den Panner-Pool; gibt false
-   * zurück, wenn schon 3 Insektengeräusche laufen oder Insekten aus sind. Pegel bewusst
-   * deutlich unter den Spielgeräuschen.
-   */
-  playCreature(kind: 'buzz' | 'whirr' | 'flutter' | 'chirp', getPos: () => { x: number; y: number; z: number }, duration: number): boolean {
+  /** Aktuelle Chor-Intensität (0,3–1), schwankt langsam über Minuten. */
+  intensity(): number {
+    return this.ctx ? chorusIntensity(this.ctx.currentTime) : 0.6;
+  }
+
+  /** Langsame Dynamik des Ambient-Beds + Ende des Duckings (aus der Frame-Schleife aufgerufen). */
+  private updateDynamics(): void {
     const ctx = this.ctx;
-    if (!ctx || ctx.state !== 'running' || !this.insectsOn) return false;
+    if (!ctx || !this.bedGain) return;
+    if (ctx.currentTime - this.lastIntensityUpdate < 0.5) return;
+    this.lastIntensityUpdate = ctx.currentTime;
+    this.bedGain.gain.setTargetAtTime(0.35 + 0.65 * this.intensity(), ctx.currentTime, 3);
+    if (this.duckUntil && ctx.currentTime > this.duckUntil) {
+      this.duckUntil = 0;
+      this.ambientGain.gain.setTargetAtTime(this.creaturesVolume * 0.9, ctx.currentTime, 0.4);
+    }
+  }
+
+  /** Spielsound ertönt → Umgebung/Insekten um ~30 % absenken (Ducking), danach sanft zurück. */
+  private duck(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.ambientGain.gain.setTargetAtTime(this.creaturesVolume * 0.9 * 0.7, ctx.currentTime, 0.05);
+    this.duckUntil = ctx.currentTime + 1.2;
+  }
+
+  /**
+   * Räumliches Insektengeräusch an einer (bewegten) Position. Zufälliges Rezept der Kategorie,
+   * Tonhöhe ±12 %, Lautstärke variiert. Nutzt den Panner-Pool (8); höchstens 6 gleichzeitig.
+   * Pegel deutlich unter den Spielgeräuschen.
+   */
+  playCreature(category: CreatureCategory, getPos: () => { x: number; y: number; z: number }): boolean {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running' || !this.insectsOn || !this.shortNoise) return false;
     const now = ctx.currentTime;
     const active = this.pool.filter((v) => v.busyUntil > now).length;
     const voice = this.pool.find((v) => v.busyUntil <= now);
     if (!voice || active >= AudioEngine.MAX_CREATURE_VOICES) return false;
-    voice.busyUntil = now + duration + 0.2;
+    const list = recipesFor(category);
+    const r = list[Math.floor(Math.random() * list.length)];
+    const dur = r.duration[0] + Math.random() * (r.duration[1] - r.duration[0]);
+    const pitch = 1 + (Math.random() * 2 - 1) * 0.12;
+    const vol = (category === 'ground' ? 0.06 : 0.09) * (0.6 + Math.random() * 0.6);
+    voice.busyUntil = now + dur + 0.2;
     voice.getPos = getPos;
     const p0 = getPos();
     voice.panner.positionX.value = p0.x;
@@ -243,68 +277,11 @@ export class AudioEngine {
     voice.panner.positionZ.value = p0.z;
     const out = ctx.createGain();
     out.gain.setValueAtTime(0, now);
-    out.gain.linearRampToValueAtTime(kind === 'chirp' ? 0.07 : 0.1, now + duration * 0.3);
-    out.gain.linearRampToValueAtTime(0, now + duration);
-    // über den Insekten-Bus in den Panner
-    const bus = ctx.createGain();
-    bus.gain.value = 1;
-    out.connect(bus).connect(voice.panner);
-    const stopAt = now + duration + 0.1;
-    if (kind === 'buzz' || kind === 'flutter') {
-      // Summen: Sägezahn mit Flügelschlag-Tremolo durch Bandpass
-      const o = ctx.createOscillator();
-      o.type = 'sawtooth';
-      o.frequency.value = kind === 'buzz' ? 190 + Math.random() * 80 : 70 + Math.random() * 30;
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = kind === 'buzz' ? 900 : 400;
-      bp.Q.value = 2;
-      const trem = ctx.createGain();
-      trem.gain.value = 0.6;
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = kind === 'buzz' ? 40 : 14;
-      const lfoG = ctx.createGain();
-      lfoG.gain.value = 0.4;
-      lfo.connect(lfoG).connect(trem.gain);
-      o.connect(bp).connect(trem).connect(out);
-      o.start(now);
-      lfo.start(now);
-      o.stop(stopAt);
-      lfo.stop(stopAt);
-    } else if (kind === 'whirr') {
-      // Libellen-Schwirren: Rauschen, schnell amplitudenmoduliert
-      const s = ctx.createBufferSource();
-      s.buffer = this.noiseBuffer(duration + 0.2);
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = 450;
-      bp.Q.value = 1.5;
-      const am = ctx.createGain();
-      am.gain.value = 0.5;
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = 32;
-      const lfoG = ctx.createGain();
-      lfoG.gain.value = 0.5;
-      lfo.connect(lfoG).connect(am.gain);
-      s.connect(bp).connect(am).connect(out);
-      s.start(now);
-      lfo.start(now);
-      lfo.stop(stopAt);
-    } else {
-      // Zirpen aus dem Wall: kurze, hohe Pulsfolge
-      for (let i = 0; i < 6; i++) {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        const t = now + i * 0.11;
-        o.frequency.value = 4200 + Math.random() * 600;
-        g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(0.5, t + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
-        o.connect(g).connect(out);
-        o.start(t);
-        o.stop(t + 0.09);
-      }
-    }
+    out.gain.linearRampToValueAtTime(vol, now + Math.min(0.3, dur * 0.3));
+    out.gain.setValueAtTime(vol, now + dur * 0.7);
+    out.gain.linearRampToValueAtTime(0, now + dur);
+    out.connect(voice.panner);
+    r.build(ctx, out, now, dur, pitch, this.shortNoise);
     return true;
   }
 
@@ -312,6 +289,7 @@ export class AudioEngine {
     this.onSubtitle?.(`sfx.${sfx}` as I18nKey);
     const ctx = this.ctx;
     if (!ctx) return;
+    this.duck();
     const t = ctx.currentTime;
     const out = ctx.createGain();
     out.connect(this.master);
@@ -354,6 +332,10 @@ export class AudioEngine {
         break;
       case 'illegal':
         tone(140, 0, 0.18, 0.35, 'square', 90);
+        break;
+      case 'pickup': // leises „Plopp“ mit Sporen-Glitzern beim Greifen
+        tone(620, 0, 0.09, 0.18, 'sine', 300);
+        tone(2400, 0.02, 0.12, 0.03, 'triangle');
         break;
       case 'end':
         [261.6, 329.6, 392, 523.3].forEach((f, i) => tone(f, i * 0.12, 2.8, 0.12, 'sine'));

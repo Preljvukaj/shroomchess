@@ -175,7 +175,7 @@ export class BoardView {
         fragmentShader: `uniform float uHalf; varying vec2 vP; void main(){ vec2 d = max(abs(vP) - uHalf, 0.0); float a = exp(-length(d) * 3.0 / max(uHalf*0.25, 0.05)); gl_FragColor = vec4(vec3(0.03,0.16,0.16)*a*0.35, a*0.35); }`,
       }),
     );
-    halo.position.y = 0.001;
+    halo.position.y = 0.003; // über der Moos-Lichtung (0,0008), kein Z-Fighting
     this.root.add(halo);
   }
 

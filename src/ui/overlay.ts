@@ -102,6 +102,8 @@ export class Overlay {
             <label>${t('coordSize')} <select data-s="coordSize"><option value="S">S</option><option value="M">M</option><option value="L">L</option></select></label>
             <label><input type="checkbox" data-s="coordHighContrast"> ${t('coordContrast')}</label>
             <label><input type="checkbox" data-s="coordsOnSquares"> ${t('coordsOnSquares')}</label>
+            <label>${t('pieceContrast')} <select data-s="pieceContrast"><option value="off">${t('pcOff')}</option><option value="normal">${t('pcNormal')}</option><option value="high">${t('pcHigh')}</option></select></label>
+            <label><input type="checkbox" data-s="whiteOutline"> ${t('whiteOutline')}</label>
           </div>
           <button class="close">${t('close')}</button>
         </div>
@@ -159,7 +161,7 @@ export class Overlay {
     // Einstellungen
     this.q<HTMLSelectElement>('[data-s=lang]').value = s.lang;
     this.q<HTMLSelectElement>('[data-s=quality]').value = qv;
-    for (const k of ['colorblind', 'markNoLegalMoves', 'subtitles', 'insects', 'insectLanding', 'coordHighContrast', 'coordsOnSquares'] as const) {
+    for (const k of ['colorblind', 'markNoLegalMoves', 'subtitles', 'insects', 'insectLanding', 'coordHighContrast', 'coordsOnSquares', 'whiteOutline'] as const) {
       const cb = this.q<HTMLInputElement>(`[data-s=${k}]`);
       cb.checked = s[k];
       cb.addEventListener('change', () => settings.set({ [k]: cb.checked }));
@@ -167,6 +169,9 @@ export class Overlay {
     const cv = this.q<HTMLInputElement>('[data-s=creaturesVolume]');
     cv.value = String(s.creaturesVolume);
     cv.addEventListener('input', () => settings.set({ creaturesVolume: Number(cv.value) }));
+    const pc = this.q<HTMLSelectElement>('[data-s=pieceContrast]');
+    pc.value = s.pieceContrast;
+    pc.addEventListener('change', () => settings.set({ pieceContrast: pc.value as 'off' | 'normal' | 'high' }));
     const cs = this.q<HTMLSelectElement>('[data-s=coordSize]');
     cs.value = s.coordSize;
     cs.addEventListener('change', () => settings.set({ coordSize: cs.value as 'S' | 'M' | 'L' }));

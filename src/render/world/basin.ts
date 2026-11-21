@@ -1,11 +1,14 @@
 import { type V2, distanceToPolygonEdge, pointInPolygon } from '../../xr/math/vec2';
+import { terrain } from './terrainConfig';
 
 /**
  * Senke um die Spielfläche (reine Mathematik, ohne Three.js → testbar).
  *
  * SICHERHEIT: Innerhalb der Spielfläche (Boundary des Hosts bzw. Desktop-Fläche) und bis
- * mindestens 0,5 m darüber hinaus ist das Gelände exakt y = 0. Der Wall beginnt 0,5–1,0 m
- * außerhalb (unregelmäßig), steigt über 3–6 m sanft auf 2,5–4 m an und geht in ein Plateau über.
+ * mindestens 0,85 m darüber hinaus ist das Gelände exakt y = 0. Der Hang beginnt ca. 1 m
+ * außerhalb (unregelmäßig, `terrain.transition`), steigt weich (Smootherstep, ohne Knick und
+ * ohne Kante) auf 1,2–1,8 m an (`terrain.basinHeight`) und geht in ein sanft welliges Plateau
+ * über. Die Hangbreite wird so gewählt, dass die Steigung `terrain.maxSlopeDeg` nicht überschreitet.
  */
 
 export interface FlatRegion {
@@ -28,14 +31,17 @@ export interface Basin {
   thetaOf(x: number, z: number): number;
 }
 
-export const MIN_RIM_START = 0.5;
-export const MAX_RIM_START = 1.0;
+export const MIN_RIM_START = 0.85 * terrain.transition;
+export const MAX_RIM_START = 1.15 * terrain.transition;
+/** Smootherstep hat die maximale Steigung 1,875 · H / W. */
+const SMOOTHER_MAX_SLOPE = 1.875;
 
 /** Deterministischer, periodischer Winkel-Rauschwert in [−1, 1]. */
 function angularNoise(seed: number): (t: number) => number {
   let a = seed * 9301 + 49297;
   const rnd = () => ((a = (a * 9301 + 49297) % 233280) / 233280);
-  const terms = [2, 3, 5, 7, 11].map((k) => ({ k, amp: 1 / Math.sqrt(k), ph: rnd() * Math.PI * 2 }));
+  // niedrige Frequenzen → organischer Rand ohne steile Querneigungen
+  const terms = [2, 3, 5].map((k) => ({ k, amp: 1 / k, ph: rnd() * Math.PI * 2 }));
   const norm = terms.reduce((s, x) => s + x.amp, 0);
   return (t) => terms.reduce((s, x) => s + x.amp * Math.sin(x.k * t + x.ph), 0) / norm;
 }
@@ -49,14 +55,17 @@ export function createBasin(region: FlatRegion, seed = 7): Basin {
   const nStart = angularNoise(seed);
   const nWidth = angularNoise(seed + 1);
   const nHeight = angularNoise(seed + 2);
-  // Wallbreite wächst mit der Fläche: kleine Räume nicht abgeschnitten, große nicht zu eng
-  const baseWidth = Math.min(6, Math.max(3, extent * 0.9));
+  const tanMax = Math.tan((terrain.maxSlopeDeg * Math.PI) / 180);
 
   const distOutside = (x: number, z: number) => (pointInPolygon({ x, z }, pts) ? 0 : distanceToPolygonEdge({ x, z }, pts));
   const thetaOf = (x: number, z: number) => Math.atan2(z - center.z, x - center.x);
   const rimStart = (t: number) => MIN_RIM_START + (MAX_RIM_START - MIN_RIM_START) * (0.5 + 0.5 * nStart(t));
-  const wallWidth = (t: number) => baseWidth * (0.85 + 0.3 * (0.5 + 0.5 * nWidth(t)));
-  const wallHeight = (t: number) => Math.min(4, Math.max(2.5, 3.2 + 0.8 * nHeight(t)));
+  const wallHeight = (t: number) => Math.min(terrain.maxHeight, Math.max(terrain.minHeight, terrain.basinHeight * (1 + 0.15 * nHeight(t))));
+  // Breite: Wunschwert (wächst leicht mit der Fläche), aber nie steiler als maxSlopeDeg
+  const wallWidth = (t: number) => {
+    const wish = terrain.basinSlopeWidth * (0.9 + 0.2 * (0.5 + 0.5 * nWidth(t))) * Math.min(1.4, Math.max(1, extent / 4));
+    return Math.max(wish, (SMOOTHER_MAX_SLOPE * wallHeight(t)) / tanMax);
+  };
 
   const heightAt = (x: number, z: number) => {
     const d = distOutside(x, z);
@@ -65,11 +74,11 @@ export function createBasin(region: FlatRegion, seed = 7): Basin {
     const u = (d - rimStart(t)) / wallWidth(t);
     if (u <= 0) return 0;
     const H = wallHeight(t);
-    // feine Unebenheiten, nur am Hang (nie negativ, nie im flachen Bereich)
-    const bump = (0.5 + 0.5 * Math.sin(x * 1.7 + Math.sin(z * 1.3) * 2)) * (0.5 + 0.5 * Math.sin(z * 2.1 + x * 0.4));
+    // leichte Unebenheiten (Noise), weich eingeblendet: nie negativ, nie im flachen Bereich, flach genug
+    const bump = (0.5 + 0.5 * Math.sin(x * 0.7 + Math.sin(z * 0.5) * 1.5)) * (0.5 + 0.5 * Math.sin(z * 0.8 + x * 0.3));
     const ramp = smoother(Math.min(1, u));
-    const plateau = u > 1 ? Math.min(1, (u - 1) * 2) * 0.35 * Math.sin(t * 9 + d * 0.7) : 0;
-    return H * ramp + bump * 0.3 * Math.min(1, u * 1.5) + plateau;
+    const plateau = u > 1 ? smoother(Math.min(1, (u - 1) * 0.5)) * 0.12 * (0.5 + 0.5 * Math.sin(x * 0.25 + z * 0.2)) : 0;
+    return H * ramp + bump * 0.05 * smoother(Math.min(1, u * 2)) + plateau;
   };
 
   return {

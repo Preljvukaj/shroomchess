@@ -3,7 +3,8 @@ import type { ChessGame } from '../core/game';
 import type { Color, MoveOption, PieceSymbol, Square } from '../core/types';
 import { squareAt } from './board';
 import type { BoardScene } from './boardScene';
-import { GRAB_DISTANCE, NEAR_DISTANCE, type PieceView } from './pieceView';
+import { grabConfig, pickGrabTarget, snapOffset } from './grab';
+import type { PieceView } from './pieceView';
 import { PLAYER_GLOW } from './pieces';
 
 /**
@@ -40,6 +41,11 @@ interface PointerState {
   dragged: boolean;
   lastCandidate: PieceView | null;
   hoverSquare: Square | null;
+  /** greifbare Figur (Hysterese) */
+  grabTarget: PieceView | null;
+  /** Snap in die Hand: Startversatz Griffpunkt − Hand (Welt) und Startzeit */
+  snapStart: THREE.Vector3 | null;
+  snapT0: number;
 }
 
 export class InteractionController {
@@ -68,7 +74,7 @@ export class InteractionController {
   private state(id: string): PointerState {
     let s = this.states.get(id);
     if (!s) {
-      s = { held: null, selected: null, pressStart: null, pressPiece: null, wasPressed: false, dragged: false, lastCandidate: null, hoverSquare: null };
+      s = { held: null, selected: null, pressStart: null, pressPiece: null, wasPressed: false, dragged: false, lastCandidate: null, hoverSquare: null, grabTarget: null, snapStart: null, snapT0: 0 };
       this.states.set(id, s);
     }
     return s;
@@ -152,10 +158,14 @@ export class InteractionController {
         if (local) {
           const lift = this.scene.kingHeight * 0.12;
           p.root.position.set(local.x, lift, local.z);
-          if (ptr.point) {
-            // Hand: Figur hängt am Griffpunkt
-            const gl = this.scene.root.worldToLocal(ptr.point.clone());
-            p.root.position.y = Math.max(lift * 0.3, gl.y - p.grip.position.y - this.scene.board.surfaceY);
+          if (ptr.point && p.root.parent) {
+            // Hand: Griffpunkt schnappt in ~100 ms (ease-out) an den Greifpunkt und hängt dann fest
+            // daran – nur Position, keine Drehung (Figur bleibt aufrecht).
+            const off = st.snapStart ? snapOffset(st.snapStart, performance.now() / 1000 - st.snapT0) : { x: 0, y: 0, z: 0 };
+            const target = ptr.point.clone().add(new THREE.Vector3(off.x, off.y, off.z));
+            const inParent = p.root.parent.worldToLocal(target);
+            // nur verhindern, dass die Figur ins Brett gedrückt wird – sonst exakt an der Hand (kein Versatz)
+            p.root.position.set(inParent.x - p.grip.position.x, Math.max(0, inParent.y - p.grip.position.y), inParent.z - p.grip.position.z);
           }
           const sq = squareAt(p.root.position.x, p.root.position.z, this.scene.squareSize);
           this.hooks.onHeldOverSquare?.(sq);
@@ -185,17 +195,18 @@ export class InteractionController {
         meshHit = (hit?.object.userData.piece as PieceView | undefined) ?? null;
       }
 
-      // Griffpunkt direkt unter dem Zeiger hat Vorrang (er ist der eigentliche Anfasser),
-      // sonst die getroffene Figur, sonst der nächste Griffpunkt in Reichweite.
-      const GRAB = GRAB_DISTANCE * this.distanceScale;
-      const NEAR = NEAR_DISTANCE * this.distanceScale;
-      const cand = bestD <= GRAB ? best : (meshHit ?? (bestD < NEAR ? best : null));
+      // Greifbar (mit Hysterese < 10 cm an / > 14 cm aus): die nächste Figur gewinnt, nur sie ist markiert.
+      // Sonst bei Strahl die getroffene Figur, sonst der nächste Griffpunkt in Annäherungsweite.
+      const NEAR = grabConfig.near * this.distanceScale;
+      st.grabTarget = pickGrabTarget(pieces, st.grabTarget, (p) => this.distanceTo(ptr, p, tmp), this.distanceScale);
+      const target = st.grabTarget;
+      const cand = target ?? meshHit ?? (bestD < NEAR ? best : null);
       if (cand) {
-        const d = cand === best && bestD <= GRAB ? bestD : meshHit === cand ? 0 : bestD;
+        const d = cand === target ? this.distanceTo(ptr, cand, tmp) : meshHit === cand ? 0 : bestD;
         const prox = THREE.MathUtils.clamp(1 - d / NEAR, 0, 1);
-        cand.proximity = Math.max(cand.proximity, prox);
+        cand.proximity = Math.max(cand.proximity, cand === target ? 1 : prox);
         if (!this.isMovable(cand)) cand.state = 'blocked';
-        else if (d <= GRAB) cand.state = 'grabbable';
+        else if (cand === target || meshHit === cand) cand.state = 'grabbable';
         else if (cand.state !== 'grabbable') cand.state = 'near';
         if (cand.state === 'grabbable') {
           outlineTarget = cand;
@@ -269,6 +280,12 @@ export class InteractionController {
     st.held = p;
     st.pressPiece = p;
     p.state = 'held';
+    p.flash = 1; // kurzes Aufleuchten des Griffpunkts
+    if (ptr.point) {
+      // Greifen klappt im ganzen „greifbar“-Bereich – die Figur schnappt dann in die Hand
+      st.snapStart = p.gripWorld(new THREE.Vector3()).sub(ptr.point);
+      st.snapT0 = performance.now() / 1000;
+    } else st.snapStart = null;
     this.showTargets(p);
     ptr.haptic?.(0.6, 50);
     this.hooks.onPickup?.();

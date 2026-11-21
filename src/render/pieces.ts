@@ -172,6 +172,48 @@ export function pieceGeometry(type: PieceSymbol, segments = 28): THREE.BufferGeo
 
 let materials: Record<Color, THREE.MeshPhysicalMaterial> | null = null;
 
+/**
+ * Dauerhafte Kontur der Figuren als Rim-Light (Fresnel) im Material: eine schmale helle Kante an der
+ * Silhouette – bei Schwarz kühles Weiß (#E8F4FF), bei Weiß optional dunkel. Kostet keinen
+ * zusätzlichen Draw Call (Inverted Hull bräuchte 16 weitere). Helligkeit unter der Bloom-Schwelle.
+ * Reihenfolge im Hervorhebungs-Zustand: Figur → heller Rand (innen) → farbige Outline (außen).
+ */
+export const CONTRAST_WIDTH = { off: 0, normal: 0.2, high: 0.34 } as const;
+export type PieceContrast = keyof typeof CONTRAST_WIDTH;
+
+const rimUniforms: Record<Color, { uRimColor: { value: THREE.Color }; uRimWidth: { value: number } }> = {
+  b: { uRimColor: { value: new THREE.Color('#e8f4ff').multiplyScalar(0.72) }, uRimWidth: { value: CONTRAST_WIDTH.normal } },
+  w: { uRimColor: { value: new THREE.Color('#120e1c') }, uRimWidth: { value: 0 } },
+};
+
+/** Rim-Light in ein (ggf. geklontes) Figurenmaterial einbauen. */
+export function applyRim(mat: THREE.MeshPhysicalMaterial, color: Color): void {
+  const u = rimUniforms[color];
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRimColor = u.uRimColor;
+    shader.uniforms.uRimWidth = u.uRimWidth;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor;\nuniform float uRimWidth;')
+      .replace(
+        '#include <opaque_fragment>',
+        `#include <opaque_fragment>
+        if (uRimWidth > 0.0) {
+          float ndv = clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0);
+          float rim = smoothstep(1.0 - uRimWidth, 1.0 - uRimWidth * 0.45, 1.0 - ndv);
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, uRimColor, rim);
+        }`,
+      );
+  };
+  mat.customProgramCacheKey = () => `piece-rim-${color}`;
+  mat.needsUpdate = true;
+}
+
+/** Einstellung „Figurenkontrast“ (Aus/Normal/Hoch) und optional dunkle Kontur für Weiß. */
+export function setPieceContrast(level: PieceContrast, whiteOutline: boolean): void {
+  rimUniforms.b.uRimWidth.value = CONTRAST_WIDTH[level];
+  rimUniforms.w.uRimWidth.value = whiteOutline ? CONTRAST_WIDTH[level] * 0.8 : 0;
+}
+
 /** Weiß: Elfenbein/Perlmutt mit Klarlack und Irisieren. Schwarz: Obsidian. */
 export function pieceMaterials(high: boolean): Record<Color, THREE.MeshPhysicalMaterial> {
   if (materials) return materials;
@@ -200,6 +242,8 @@ export function pieceMaterials(high: boolean): Record<Color, THREE.MeshPhysicalM
       emissiveIntensity: 0.5,
     }),
   };
+  applyRim(materials.w, 'w');
+  applyRim(materials.b, 'b');
   return materials;
 }
 

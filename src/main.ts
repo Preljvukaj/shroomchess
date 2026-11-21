@@ -18,6 +18,8 @@ async function boot(): Promise<void> {
   const ui = document.getElementById('ui')!;
   const route = parseRoute(location.search);
   const params = new URLSearchParams(location.search);
+  // Debug: Objekte rot markieren, deren Basis > 3 cm neben dem Gelände liegt
+  if (params.get('debug') === 'ground') (globalThis as unknown as { __myzelDebugGround: boolean }).__myzelDebugGround = true;
   if (params.get('xremu') === '1') {
     const { installEmulator } = await import('./xr/emulator');
     await installEmulator(params);

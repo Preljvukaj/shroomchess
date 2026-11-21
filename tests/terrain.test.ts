@@ -53,7 +53,7 @@ describe('Senke: begehbarer Bereich bleibt flach (Sicherheit)', () => {
     });
   }
 
-  it('Wall steigt außerhalb auf 2,5–4 m an und ist unregelmäßig', () => {
+  it('Wall steigt außerhalb auf 1,2–1,8 m an und ist unregelmäßig', () => {
     const b = createBasin({ pts: regions.desktop });
     const heights: number[] = [];
     for (let a = 0; a < 64; a++) {
@@ -64,17 +64,41 @@ describe('Senke: begehbarer Bereich bleibt flach (Sicherheit)', () => {
       while (b.distOutside(Math.cos(t) * r, Math.sin(t) * r) < d) r += 0.01;
       heights.push(b.heightAt(Math.cos(t) * r, Math.sin(t) * r));
     }
-    expect(Math.min(...heights)).toBeGreaterThanOrEqual(2.5);
-    expect(Math.max(...heights)).toBeLessThanOrEqual(4.4); // 4 m + feine Unebenheit
-    expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(0.3); // kein perfekter Kreis
+    expect(Math.min(...heights)).toBeGreaterThanOrEqual(1.2);
+    expect(Math.max(...heights)).toBeLessThanOrEqual(1.8 + 0.06); // 1,8 m + leichter Noise
+    expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(0.1); // kein perfekter Kreis
   });
 
-  it('Wallbreite passt sich der Flächengröße an', () => {
-    const small = createBasin({ pts: regions.kleinerRaum });
-    const big = createBasin({ pts: regions.großerRaum });
-    expect(small.wallWidth(0)).toBeGreaterThanOrEqual(3 * 0.85);
-    expect(big.wallWidth(0)).toBeGreaterThan(small.wallWidth(0));
+  it('Hang: mindestens 3 m breit, beginnt ~1 m nach der Umrandung', () => {
+    for (const pts of Object.values(regions)) {
+      const b = createBasin({ pts });
+      for (let a = 0; a < 32; a++) {
+        const t = (a / 32) * Math.PI * 2;
+        expect(b.wallWidth(t)).toBeGreaterThanOrEqual(3);
+        expect(b.rimStart(t)).toBeGreaterThanOrEqual(0.85 - 1e-9);
+        expect(b.rimStart(t)).toBeLessThanOrEqual(1.15 + 1e-9);
+      }
+    }
   });
+
+  for (const [name, pts] of Object.entries(regions)) {
+    it(`${name}: Steigung überall ≤ 25° (inkl. Noise und Querneigung)`, () => {
+      const b = createBasin({ pts });
+      const rnd = lcg(5);
+      const e = 0.02;
+      let maxDeg = 0;
+      for (let i = 0; i < 20000; i++) {
+        const t = rnd() * Math.PI * 2;
+        const r = b.extent + rnd() * 22;
+        const x = b.center.x + Math.cos(t) * r;
+        const z = b.center.z + Math.sin(t) * r;
+        const gx = (b.heightAt(x + e, z) - b.heightAt(x - e, z)) / (2 * e);
+        const gz = (b.heightAt(x, z + e) - b.heightAt(x, z - e)) / (2 * e);
+        maxDeg = Math.max(maxDeg, (Math.atan(Math.hypot(gx, gz)) * 180) / Math.PI);
+      }
+      expect(maxDeg).toBeLessThanOrEqual(25);
+    });
+  }
 
   it('Brett aus der Boundary-Anpassung liegt komplett im flachen Bereich', () => {
     const pts = regions.lForm;

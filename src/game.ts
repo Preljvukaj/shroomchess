@@ -13,7 +13,7 @@ import { downloadPgn, importPgnToLichess } from './lichess/export';
 import { getToken } from './lichess/auth';
 import { BoardScene } from './render/boardScene';
 import { InteractionController } from './render/interaction';
-import { PLAYER_GLOW } from './render/pieces';
+import { PLAYER_GLOW, setPieceContrast } from './render/pieces';
 import { SceneContext } from './render/scene';
 import { createWorld, squareRegion } from './render/world';
 import { squarePolygon } from './render/world/basin';
@@ -148,6 +148,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
       return m !== null;
     },
     onIllegal: () => audio.play('illegal'),
+    onPickup: () => audio.play('pickup'),
     onHeldOverSquare: (sq) => board.coords.highlightSquare(sq),
   });
 
@@ -268,6 +269,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     board.highlights.refreshPalette();
     board.markNoLegalMoves = s.markNoLegalMoves;
     board.coords.apply(s, viewSide);
+    setPieceContrast(s.pieceContrast, s.whiteOutline);
     audio.setVolume(s.volume);
     audio.setCreatures(s.creaturesVolume, s.insects);
     insects.setEnabled(s.insects, s.insectLanding);

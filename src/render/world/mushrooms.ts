@@ -98,6 +98,8 @@ export const DETAIL = {
   medium: { capSeg: 20, capRings: 8, gills: 16, stemRad: 9, stemRings: 8, far: false },
   high: { capSeg: 28, capRings: 10, gills: 24, stemRad: 12, stemRings: 10, far: false },
   far: { capSeg: 10, capRings: 4, gills: 0, stemRad: 5, stemRings: 3, far: true },
+  /** Sehr weit: Low-Poly-Hut (8 Segmente) mit leuchtender Unterseite, Stiel 5 Segmente – ersetzt die früheren Billboards. */
+  vfar: { capSeg: 8, capRings: 3, gills: 0, stemRad: 5, stemRings: 2, far: true },
 } satisfies Record<string, Detail>;
 
 type Builder = { pos: number[]; part: number[]; rad: number[]; idx: number[] };
@@ -404,64 +406,4 @@ export function attachInstanceAttributes(geo: THREE.BufferGeometry, count: numbe
   geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
   geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 1));
   return { tint, phase, seed };
-}
-
-/**
- * Impostors für sehr weit entfernte Pilze: Billboards (immer zur Kamera gedreht) mit
- * prozeduraler Silhouette (Hut, Stiel, leuchtender Lamellenschein). Ein Draw Call.
- */
-export function createBillboards(items: { x: number; y: number; z: number; h: number; color: THREE.Color }[]): THREE.Mesh {
-  const geo = new THREE.InstancedBufferGeometry();
-  const quad = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
-  geo.index = quad.index;
-  geo.setAttribute('position', quad.getAttribute('position'));
-  geo.setAttribute('uv', quad.getAttribute('uv'));
-  const off = new Float32Array(items.length * 4);
-  const col = new Float32Array(items.length * 3);
-  items.forEach((it, i) => {
-    off.set([it.x, it.y, it.z, it.h], i * 4);
-    col.set([it.color.r, it.color.g, it.color.b], i * 3);
-  });
-  geo.setAttribute('aOff', new THREE.InstancedBufferAttribute(off, 4));
-  geo.setAttribute('aCol', new THREE.InstancedBufferAttribute(col, 3));
-  geo.instanceCount = items.length;
-  const mat = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    uniforms: { ...worldUniforms },
-    vertexShader: /* glsl */ `
-      attribute vec4 aOff; attribute vec3 aCol; uniform float uTime;
-      varying vec2 vUv; varying vec3 vCol; varying float vDist; varying float vPh;
-      void main(){
-        vUv = uv; vCol = aCol; vPh = aOff.x * 0.37 + aOff.z * 0.21;
-        vec4 mvCenter = viewMatrix * vec4(aOff.xyz, 1.0);
-        vec2 size = vec2(aOff.w * 0.9, aOff.w);
-        vec4 mv = mvCenter + vec4(position.x * size.x, position.y * size.y, 0.0, 0.0);
-        vDist = length(mv.xyz);
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: /* glsl */ `
-      uniform float uTime; uniform vec3 uTint; uniform float uTintAmt;
-      varying vec2 vUv; varying vec3 vCol; varying float vDist; varying float vPh;
-      ${GLSL_FOG}
-      void main(){
-        vec2 p = vUv - vec2(0.5, 0.0);
-        // gewölbter Hut (Halbellipse) mit weichen Kanten
-        float cap = smoothstep(0.03, 0.0, length((p - vec2(0.0, 0.72)) / vec2(0.5, 0.26)) - 1.0) * smoothstep(0.69, 0.73, vUv.y);
-        float stem = step(abs(p.x), 0.045 * (1.2 - vUv.y * 0.4)) * step(vUv.y, 0.8);
-        float glow = exp(-pow((vUv.y - 0.72) * 14.0, 2.0)) * smoothstep(0.5, 0.1, abs(p.x));
-        float a = max(max(cap, stem), glow * 0.8);
-        if (a < 0.02) discard;
-        vec3 c = mix(vCol, uTint, uTintAmt);
-        float pulse = 0.7 + 0.3 * sin(uTime * 0.7 + vPh);
-        vec3 col = c * 0.12 * (cap + stem) + c * glow * pulse;
-        gl_FragColor = vec4(applyFog(col, vDist * 0.6), a * 0.8);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-      }`,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.frustumCulled = false;
-  mesh.name = 'mushroom-impostors';
-  return mesh;
 }

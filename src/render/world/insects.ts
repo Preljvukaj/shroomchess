@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { AudioEngine } from '../../audio/audio';
 import type { QualityProfile } from '../scene';
+import { nextInterval } from '../../audio/insectSounds';
 import { mulberry32, safeMerge, worldUniforms } from '../shared';
 import { regionRadius } from './basin';
 import type { World } from './index';
@@ -219,8 +220,8 @@ export function createInsects(
   // --- Ton: Vorbeiflug alle 5–20 s, Zirpen aus den Wällen alle 8–20 s ---
   let enabled = true;
   let landingOn = true;
-  let nextFlyby = 6 + rng() * 10;
-  let nextChirp = 8 + rng() * 12;
+  // Einzelgeräusche: alle 1,5–6 s (je nach Chor-Intensität), max. 6 gleichzeitig (AudioEngine)
+  let nextSound = 2 + rng() * 2;
 
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -283,21 +284,26 @@ export function createInsects(
       writeMatrices(dragon);
       writeMatrices(moths);
 
-      nextFlyby -= dt;
-      if (nextFlyby <= 0) {
-        nextFlyby = 5 + rng() * 15;
+      nextSound -= dt;
+      if (nextSound <= 0) {
+        nextSound = nextInterval(rng(), audio.intensity());
+        // Vorbeiflug: an einem echten Insekt, das gerade in 1–6 m Entfernung fliegt
         const cands = agents.filter((a) => {
           const d = Math.hypot(a.p.x - head.x, a.p.y - head.y, a.p.z - head.z);
           return d > 1.0 && d < 6 && a.kind !== 'firefly';
         });
-        const a = cands[Math.floor(rng() * cands.length)];
-        if (a) audio.playCreature(a.kind === 'dragonfly' ? 'whirr' : a.kind === 'moth' ? 'flutter' : 'buzz', () => a.p, a.kind === 'dragonfly' ? 1.2 : 1.8);
-      }
-      nextChirp -= dt;
-      if (nextChirp <= 0) {
-        nextChirp = 8 + rng() * 12;
-        const w = env.wallPoint(rng, 0.2, 1.5);
-        audio.playCreature('chirp', () => w, 1.4);
+        if (cands.length && rng() < 0.55) {
+          const a = cands[Math.floor(rng() * cands.length)];
+          audio.playCreature('flyby', () => a.p);
+        } else {
+          // Zirpen: aus der Vegetation am Boden oder aus dem Wall (Geländehöhe aus der Höhenfunktion)
+          const spots = world.chirpSpots;
+          const w = spots.length && rng() < 0.6 ? spots[Math.floor(rng() * spots.length)].clone() : (() => {
+            const p = env.wallPoint(rng, 0.05, 0.4);
+            return new THREE.Vector3(p.x, p.y, p.z);
+          })();
+          audio.playCreature('ground', () => w);
+        }
       }
     },
   };

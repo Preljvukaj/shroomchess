@@ -106,7 +106,22 @@ Handtracking. Ohne `bounds` startet die manuelle Flächeneinrichtung. Steuerung 
 Sprache · Qualität · Farbenblind-Palette · Figuren ohne legalen Zug markieren · Untertitel · Lautstärke ·
 **Tiere / Umgebung** (eigene Lautstärke) · **Insekten anzeigen** (aus = auch keine Insektengeräusche) ·
 **Glühwürmchen landen auf der Hand** (VR) · **Koordinatengröße S/M/L** · **Koordinaten hoher Kontrast** ·
-**Koordinaten auf den Feldern**
+**Koordinaten auf den Feldern** · **Figurenkontrast** Aus/Normal/Hoch (helle Kontur der schwarzen Figuren) ·
+**Dunkle Kontur für Weiß** (optional)
+
+### Senke anpassen
+
+Die Form der Senke steht zentral in `src/render/world/terrainConfig.ts`:
+
+| Parameter | Standard | Bedeutung |
+|---|---|---|
+| `terrain.basinHeight` | 1,5 m | mittlere Wallhöhe (je Richtung begrenzt auf 1,2–1,8 m) |
+| `terrain.basinSlopeWidth` | 5 m | gewünschte Hangbreite (wird verbreitert, falls sonst steiler als `maxSlopeDeg`) |
+| `terrain.transition` | 1,0 m | Abstand Spielflächenrand → Hangfuß |
+| `terrain.maxSlopeDeg` | 21° | höchste Steigung (inkl. Unebenheiten < 25°) |
+| `terrain.clearingFade` | 0,3 m | weicher Übergang der Moos-Lichtung |
+
+Debug: `?debug=ground` markiert Objekte rot, deren Basis mehr als 3 cm neben dem Gelände liegt.
 
 ## Projektstruktur
 

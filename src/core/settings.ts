@@ -27,6 +27,10 @@ export interface Settings {
   insects: boolean;
   /** Easter Egg: Glühwürmchen landet auf ruhig gehaltener Hand (VR). */
   insectLanding: boolean;
+  /** Figurenkontrast: helle Kontur der schwarzen Figuren (Aus/Normal/Hoch). */
+  pieceContrast: 'off' | 'normal' | 'high';
+  /** Optional: dunkle Kontur für die weißen Figuren. */
+  whiteOutline: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -47,6 +51,8 @@ const DEFAULTS: Settings = {
   creaturesVolume: 0.6,
   insects: true,
   insectLanding: true,
+  pieceContrast: 'normal',
+  whiteOutline: false,
 };
 
 const KEY = 'myzel-schach.settings.v1';

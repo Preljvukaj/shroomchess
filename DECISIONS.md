@@ -224,3 +224,58 @@ Chunk und wird nur bei diesem Parameter geladen. IWER liefert keine `boundsGeome
 So wurden geprüft: Sitzungsstart, Brett-Platzierung, Zug mit Controller und mit Pinch, manuelle Einrichtung (4 Ecken),
 Menü über Taste Y, Aufgeben mit Doppeltippen, VR verlassen. Nicht ersetzt wird damit der Test auf echter Hardware
 (Tracking, Bildrate, Lesbarkeit, Haptik).
+
+## Änderungsrunde 3 (Senke flacher, Snap, Kontur, Klang, Fern-Pilze, Lichtung, Bodenkontakt)
+
+**D38 – Senke flacher und weicher, zentral konfigurierbar (`src/render/world/terrainConfig.ts`).** `terrain.basinHeight`
+(1,5 m, je Richtung 1,2–1,8 m) und `terrain.basinSlopeWidth` (Wunschbreite 5 m), dazu `transition` (Hangfuß ~1 m nach der
+Umrandung), `maxSlopeDeg` (21°) und `clearingFade`. Das Profil ist eine Smootherstep-Kurve (Steigung und Krümmung am Fuß und oben = 0,
+also kein Knick und keine Kante) mit leichtem, weich eingeblendetem Noise. Die Breite wird automatisch so vergrößert, dass die Steigung
+höchstens `maxSlopeDeg` beträgt (W ≥ 1,875·H / tan 21°). Bei 1,5 m Höhe ist der Hang dadurch ~7 m breit, also mehr als die geforderten 3–5 m.
+Getestet sind ≤ 25° inkl. Noise und Querneigung für fünf Flächenformen. Die Spielfläche bleibt unverändert exakt y = 0. Die Senke entsteht
+nur durch Anheben außerhalb, das war schon vorher so.
+
+**D39 – Bodenkontakt:** Jedes Objekt wird bei der Generierung (kein Raycast pro Frame) aus `heightAt` platziert. Die Grundfläche
+wird an 9 Punkten abgetastet, der niedrigste Wert gilt. Die Basis wird um 3 % der Höhe versenkt, mindestens 5 mm und höchstens 3 cm, damit auch
+große Pilze innerhalb der 3-cm-Toleranz bleiben. Neigung: Pilze und Pflanzen höchstens 15° zur Hangnormalen + ≤ 5° Zufall
+(Riesen ≤ 8° + leichtes Einwärtsneigen, gesamt ≤ 20°). Moospolster liegen ganz auf der Normalen. Unit-Test: kein Objekt
+schwebt oder steckt tiefer als 3 cm. Debug-Modus `?debug=ground` färbt Abweichler rot.
+
+**D40 – Spielflächen-Umrandung als eigenes Mesh statt im Terrain-Shader.** Ein Polygon-Abstand pro Pixel im großflächigen
+Terrain-Shader (bis zu Hunderte Boundary-Punkte) wäre auf der Quest zu teuer. Stattdessen gibt es ein trianguliertes Polygon (Earcut, auch
+konkav) plus ein 30-cm-Übergangsband (Gehrung begrenzt), Moos-Shader mit Noise-Rand, 1 Draw Call, y = 0,0008 mit Polygon-Offset.
+Die Innenkontur ist exakt das Boundary-Polygon (getestet). Der Saum besteht aus 3–6,5 cm hohen Moospolstern mit Mini-Leuchtpilzen 8–38 cm
+außerhalb. Er wird bei jedem Neuaufbau der Welt (neue Fläche, `reset`) mit erzeugt.
+
+**D41 – Keine Billboards mehr, statische LOD statt Überblendung.** Fern-Pilze sind echte 3D-Pilze in drei Stufen (Lamellen /
+Lamellen-Scheibe / 8-Segment-Low-Poly mit leuchtender Unterseite), dicht in Büscheln. Die Stufe hängt am Abstand zur Spielfläche,
+nicht an der Kamera. In Roomscale verlässt der Spieler die Fläche nicht, es gibt also zur Laufzeit keinen LOD-Wechsel und damit kein
+„Ploppen“. Eine Dithering-Überblendung ist deshalb nicht nötig. Test: keine Sprites/Billboard-Shader in der Vegetation.
+Die Glühwürmchen-Leuchtpunkte der Insekten bleiben kamera-ausgerichtete Mini-Quads (Lichtpunkte ohne Form, 1–5 cm). Das betrifft keine Pilze.
+
+**D42 – Greifen mit Hysterese und Snap (`src/render/grab.ts`).** „Greifbar“ gilt unter 10 cm, endet erst über 14 cm. Die nächste Figur
+gewinnt, eine andere übernimmt nur, wenn sie > 2 cm näher ist. Greifen löst im ganzen greifbaren Bereich aus. Die Figur schnappt in 100 ms
+(kubisches ease-out, monoton, ohne Überschwingen) an den Greifpunkt und hängt danach exakt daran. Es wird nur die Position übernommen,
+die Figur bleibt aufrecht. Feedback: Haptik, leises „Plopp“, kurzes Aufleuchten des Griffpunkts. Desktop nutzt dieselbe Zustandslogik.
+
+**D43 – Kontur der schwarzen Figuren als Rim-Light (Fresnel) im Material, nicht als Inverted Hull.** Eine Dauerkontur per
+Inverted Hull bräuchte 16 zusätzliche Draw Calls (Low: 84 → 100). Das Rim-Light kostet keinen. Reihenfolge im Hervorhebungs-Zustand:
+Figur → helle Kante (innen, im Material) → farbige Outline (außen, Inverted Hull nur für die eine markierte Figur). Farbe #E8F4FF ×0,72
+bleibt unter der Bloom-Schwelle. Einstellung „Figurenkontrast“ Aus/Normal/Hoch steuert die Breite, optional gibt es eine dunkle Kante für Weiß.
+Grenze: Die Breite hängt an der Krümmung, nicht exakt an Pixeln. Auf den runden Staunton-Formen sind das wenige Millimeter.
+
+**D44 – Mehr Insektenklang:**
+- Ambient-Bed aus drei nahtlosen Stereo-Loops (64 s Grillenchor, 23 s Summen, 37 s Triller), prozedural mit 16 kHz erzeugt, ~16 MB
+  statt ~45 MB, ereignisbasiert, verteilt auf mehrere Ticks
+- 15 Einzelgeräusch-Rezepte (8 Vorbeiflug, 7 Boden), Tonhöhe ±12 %, Lautstärke variiert, Intervall 1,5–6 s je nach Chor-Intensität
+  (schwankt über ~5–8 min)
+- Pool 8 HRTF-Panner, max. 6 gleichzeitig. Vorbeiflüge hängen an echten Insekten in 1–6 m, Zirpen kommt aus bodennahen Vegetationspunkten
+  und dem Wall
+- Ducking −30 % bei jedem Spielsound
+- Doppler nicht umgesetzt, Web Audio hat ihn entfernt
+
+Bed und Einzelgeräusche laufen über den Insekten-Bus. „Insekten aus“ schaltet alles davon stumm, „Tiere / Umgebung“ regelt die Lautstärke.
+
+**D45 – Performance nach Runde 3 (Headless-Browser, Draw Calls/Dreiecke):** Low 84 / 181k, Medium 84 / 400k, High (Desktop)
+98 / 1,05 Mio. Alles liegt im Quest-Budget, es war keine Reduzierung nötig. Die FPS auf der Quest sind weiterhin nicht gemessen. Reihenfolge für Kürzungen: Fern-Pilze
+(`vfarShrooms`, `farShrooms`) → Insekten → Bloom.

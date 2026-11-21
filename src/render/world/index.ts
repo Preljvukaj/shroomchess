@@ -4,14 +4,20 @@ import { worldUniforms } from '../shared';
 import { type Basin, type FlatRegion, createBasin, squarePolygon } from './basin';
 import { createGroundFog, createParticles } from './particles';
 import { createSky } from './sky';
+import { createClearing } from './clearing';
 import { createTerrain } from './terrain';
-import { createVegetation } from './vegetation';
+import { terrain } from './terrainConfig';
+import { type GroundedObject, createVegetation } from './vegetation';
 
 export interface World {
   root: THREE.Group;
   basin: Basin;
   /** Positionen leuchtender Pilzhüte (für Motten). */
   attractors: THREE.Vector3[];
+  /** Bodennahe Zirp-Quellen in der Vegetation. */
+  chirpSpots: THREE.Vector3[];
+  /** Alle platzierten Objekte (Bodenkontakt-Prüfung). */
+  grounded: GroundedObject[];
   /** Spielende: Dschungel leuchtet in der Siegerfarbe (null = Remis → Violett/Weiß). */
   celebrate(color: THREE.Color | null): void;
   resetTint(): void;
@@ -31,6 +37,7 @@ export function createWorld(profile: QualityProfile, region: FlatRegion): World 
   root.name = 'world';
   root.add(createSky());
   root.add(createTerrain(basin, profile.terrainAngular));
+  root.add(createClearing(region.pts, terrain.clearingFade));
   const veg = createVegetation(profile, basin);
   root.add(veg.group);
   const rim = basin.extent + basin.rimDistance(0);
@@ -42,6 +49,8 @@ export function createWorld(profile: QualityProfile, region: FlatRegion): World 
     root,
     basin,
     attractors: veg.attractors,
+    chirpSpots: veg.chirpSpots,
+    grounded: veg.grounded,
     celebrate(color) {
       worldUniforms.uTint.value.copy(color ?? new THREE.Color('#d7b8ff'));
       target = 0.85;

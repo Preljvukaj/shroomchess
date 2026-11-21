@@ -80,7 +80,7 @@ export function createParticles(profile: QualityProfile, basinRadius: number): T
  */
 export function createGroundFog(innerRadius: number, outerRadius: number): THREE.Group {
   const g = new THREE.Group();
-  for (const [y, strength] of [[0.12, 0.42], [0.45, 0.2]] as const) {
+  for (const [y, strength] of [[0.1, 0.42], [0.3, 0.18]] as const) {
     const geo = new THREE.CircleGeometry(outerRadius, 64);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.ShaderMaterial({

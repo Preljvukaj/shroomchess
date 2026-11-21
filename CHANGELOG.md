@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 – Senke, Greifen, Kontrast, Klang, Fern-Pilze, Lichtung
+
+- **Senke flacher und weicher:** Wall 1,2–1,8 m (vorher bis 4 m), Hangfuß ~1 m nach der Spielfläche, weiches Profil ohne Knick,
+  überall ≤ 25° Steigung. Einstellbar über `terrain.basinHeight` / `terrain.basinSlopeWidth` (`src/render/world/terrainConfig.ts`).
+- **Bodenkontakt:** Alle Pilze, Pflanzen, Myzelfäden und Ranken stehen auf dem Gelände (Grundfläche abgetastet, leicht versenkt,
+  begrenzte Neigung). Debug: `?debug=ground` markiert Abweichler rot.
+- **Spielflächen-Umrandung:** Moos-Lichtung in exakt der Form der Boundary bzw. der eingerichteten Fläche, schwaches Sporenleuchten,
+  weicher Noise-Rand, Saum aus Moospolstern und Mini-Leuchtpilzen außerhalb.
+- **Fern-Pilze:** Billboards entfernt. Stattdessen viele echte 3D-Pilze (neue Low-Poly-Stufe) in Büscheln.
+- **Greifen:** Ist der Griffpunkt groß markiert, greift die Geste sofort, auch ohne genaue Berührung. Die Figur schnappt in ~100 ms in die Hand,
+  bleibt aufrecht, mit Haptik, „Plopp“ und Aufleuchten. Hysterese 10/14 cm, die nächste Figur gewinnt.
+- **Figurenkontrast:** Schwarze Figuren haben eine feine helle Kontur (Einstellung Aus/Normal/Hoch), optional eine dunkle Kontur für Weiß.
+- **Insektenklang:** durchgehende Klangfläche aus drei Loops, 15 verschiedene Einzelgeräusche alle 1,5–6 s (bis 6 gleichzeitig),
+  langsam schwankende Chor-Intensität, Ducking bei Spielsounds.
+- **Tests:** 87 (vorher 66). Neu: Steigung/Höhe der Senke, Hangbreite, Bodenkontakt (3 cm), Lichtung = Boundary-Polygon,
+  keine Billboards, Saum außerhalb der Fläche, Greif-Hysterese und Snap, Insektenklänge (Loop-Länge, Naht, Anzahl, Intervalle).
+
+
 ## 0.3.0 – Meilenstein 2: VR-Einzelspieler
 
 ### Neu

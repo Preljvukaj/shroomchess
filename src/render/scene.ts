@@ -18,8 +18,10 @@ export interface QualityProfile {
   rimGiants: number;
   /** Pilze hinter dem Wall (Fern-LOD ohne Lamellen). */
   farShrooms: number;
-  /** Impostors (Billboards) in großer Entfernung. */
-  billboards: number;
+  /** Sehr weit entfernte 3D-Pilze (Low-Poly-LOD, ersetzt Billboards). */
+  vfarShrooms: number;
+  /** Saum aus Moospolstern/Mini-Leuchtpilzen am Rand der Spielfläche (pro Meter Umfang). */
+  saumPerMeter: number;
   /** Baby-Pilze rund um größere Exemplare. */
   babies: number;
   ferns: number;
@@ -33,9 +35,9 @@ export interface QualityProfile {
 }
 
 export const QUALITY: Record<Quality, QualityProfile> = {
-  low: { pixelRatio: 1, bloom: false, latheSegments: 18, shroomDetail: 'low', nearShrooms: 60, rimGiants: 12, farShrooms: 22, billboards: 50, babies: 40, ferns: 90, pods: 40, spores: 300, vines: 10, mycelium: 20, terrainAngular: 72, insects: 30 },
-  medium: { pixelRatio: 1.5, bloom: false, latheSegments: 26, shroomDetail: 'medium', nearShrooms: 120, rimGiants: 22, farShrooms: 45, billboards: 100, babies: 100, ferns: 220, pods: 100, spores: 800, vines: 20, mycelium: 45, terrainAngular: 96, insects: 80 },
-  high: { pixelRatio: 2, bloom: true, latheSegments: 36, shroomDetail: 'high', nearShrooms: 280, rimGiants: 36, farShrooms: 80, billboards: 180, babies: 220, ferns: 480, pods: 200, spores: 2000, vines: 36, mycelium: 90, terrainAngular: 128, insects: 200 },
+  low: { pixelRatio: 1, bloom: false, latheSegments: 18, shroomDetail: 'low', nearShrooms: 60, rimGiants: 12, farShrooms: 40, vfarShrooms: 120, saumPerMeter: 3, babies: 40, ferns: 90, pods: 40, spores: 300, vines: 10, mycelium: 20, terrainAngular: 72, insects: 30 },
+  medium: { pixelRatio: 1.5, bloom: false, latheSegments: 26, shroomDetail: 'medium', nearShrooms: 120, rimGiants: 22, farShrooms: 70, vfarShrooms: 220, saumPerMeter: 5, babies: 100, ferns: 220, pods: 100, spores: 800, vines: 20, mycelium: 45, terrainAngular: 96, insects: 80 },
+  high: { pixelRatio: 2, bloom: true, latheSegments: 36, shroomDetail: 'high', nearShrooms: 280, rimGiants: 36, farShrooms: 120, vfarShrooms: 420, saumPerMeter: 8, babies: 220, ferns: 480, pods: 200, spores: 2000, vines: 36, mycelium: 90, terrainAngular: 128, insects: 200 },
 };
 
 export type FrameCallback = (dt: number, time: number, frame?: XRFrame) => void;
