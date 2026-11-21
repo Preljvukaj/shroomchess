@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "dev:vite": "vite"
+    "dev:vite": "vite",
+    "deploy": "bash scripts/deploy.sh"
   },
   "author": "",
   "license": "UNLICENSED",

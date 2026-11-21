@@ -53,14 +53,24 @@ WebXR läuft nur in einem sicheren Kontext.
 
 ## Deployment
 
-`npm run build` erzeugt eine rein statische Seite in `dist/`. Sie läuft auf jedem HTTPS-Webspace
-(GitHub Pages, Netlify, Cloudflare Pages, nginx …). Anforderungen:
+`npm run build` erzeugt eine rein statische Seite in `dist/`. Sie läuft auf jedem HTTPS-Webspace.
 
-- `.wasm` muss als `application/wasm` ausgeliefert werden (Standard bei allen genannten Hostern).
+**netcup/Plesk (aktuell: https://shroomchess.msmr.co/):** Der Branch **`deploy`** enthält nur den fertigen Build
+(plus `.htaccess` für die Dateitypen und den GPL-Hinweis für Stockfish). In Plesk unter Git das Repo mit Branch `deploy`
+eintragen und als Ziel `httpdocs` wählen. Ein Update geht so:
+
+```bash
+npm run deploy      # baut neu und pusht den Build in den Branch deploy
+```
+
+danach in Plesk „Jetzt abrufen“ klicken. Branch `main` (Quellcode) darf **nicht** ins Webroot: Browser können `src/main.ts`
+nicht ausführen, die Seite bliebe leer.
+
+Allgemein:
+- `.wasm` muss als `application/wasm` ausgeliefert werden.
 - Keine COOP/COEP-Header nötig (Stockfish läuft single-threaded, siehe DECISIONS.md).
 - Unterverzeichnis: `vite build --base=/pfad/`.
-- Ab Meilenstein 3 kommt der Signaling-Server (`server/`, Node + WebSocket) dazu. Er braucht ebenfalls TLS (`wss://`),
-  z. B. hinter einem Reverse-Proxy.
+- Ab Meilenstein 3 kommt der Signaling-Server (`server/`, Node + WebSocket) dazu und braucht `wss://`.
 
 ## Bedienung (Desktop)
 
