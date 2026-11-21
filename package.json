@@ -1,0 +1,33 @@
+{
+  "name": "myzel-schach",
+  "version": "0.1.0",
+  "description": "Riesenschach in WebXR im Weltraum-Dschungel",
+  "scripts": {
+    "postinstall": "node scripts/copy-engine.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev:vite": "vite"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "chess.js": "^1.4.0",
+    "stockfish": "^19.0.1",
+    "three": "^0.187.0",
+    "troika-three-text": "^0.53.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "private": true
+}
