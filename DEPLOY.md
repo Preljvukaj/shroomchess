@@ -1,6 +1,6 @@
 # Myzel-Schach – Deploy-Branch
 
-Dieser Branch enthält nur die **fertig gebaute Webseite** (`npm run build` aus `main`, Commit 69e1303).
+Dieser Branch enthält nur die **fertig gebaute Webseite** (`npm run build` aus `main`).
 Er wird direkt ins Webroot (`httpdocs`) ausgerollt. Quellcode, Doku und Tests liegen im Branch `main`.
 
 Voraussetzungen am Server: HTTPS (für WebXR und Lichess-Login), `.wasm` als `application/wasm` (siehe `.htaccess`).
