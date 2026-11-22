@@ -1,18 +1,23 @@
 import { FILES } from '../core/types';
 
 /**
- * Reine Layout-Berechnung für die Koordinaten-Glyphen am Brettrand (testbar ohne WebGL).
+ * Layout der Brett-Beschriftung (rein, testbar ohne WebGL).
  *
- * Brett-Konvention: Weiß steht bei +Z und blickt nach −Z, Schwarz umgekehrt.
- * Eine Glyphe ist ein Text in der lokalen XY-Ebene (oben = +Y, Vorderseite = +Z).
- * Sie wird mit Euler-Reihenfolge 'YXZ' gedreht:
- *   yaw   – um Y: 0 für Weiß, π für Schwarz (Text zeigt zum jeweiligen Leser),
- *   pitch – um X: −(90° − tilt). Bei tilt = 0 liegt der Text flach, die Oberkante zeigt
- *           vom Leser weg. tilt > 0 neigt ihn zum Leser hin auf.
+ * Wie bei einem echten Schachbrett liegt die Beschriftung FLACH in einem umlaufenden Steinrahmen
+ * (Breite 45 % einer Feldbreite): a–h an unterer und oberer Kante, 1–8 an linker und rechter Kante,
+ * jeweils mittig vor Feld bzw. Reihe.
  *
- * Jeder Spieler liest die Koordinaten auf SEINER Seite: Linien (a–h) an der eigenen
- * Grundreihe, Reihen (1–8) an seiner linken Brettkante.
+ * Brett-Konvention: Weiß steht bei +Z und blickt nach −Z. Eine Glyphe ist Text in der lokalen XY-Ebene
+ * (oben = +Y, Vorderseite = +Z), gedreht mit Euler 'YXZ': pitch = −90° (flach, Normale nach oben),
+ * yaw = 0 → für Weiß lesbar (Oberkante zeigt von Weiß weg), yaw = π → für Schwarz.
+ *
+ * Ausrichtung:
+ *   'both' – jede Seite für den Spieler dort: untere Kante für Weiß, obere für Schwarz; die seitlichen
+ *            Zahlen zur jeweils näheren Grundreihe (1–4 für Weiß, 5–8 für Schwarz). Für Hot-Seat/zwei Brillen.
+ *   'w'/'b' – alles für die gewählte Farbe lesbar (Einzelspieler/online), wie ein gedrucktes Brett.
  */
+export type CoordOrientation = 'both' | 'w' | 'b';
+
 export interface CoordLabel {
   text: string;
   kind: 'file' | 'rank';
@@ -25,27 +30,33 @@ export interface CoordLabel {
   pitch: number;
 }
 
-export const COORD_TILT_DEG = 25;
+/** Breite des Steinrahmens relativ zur Feldbreite (Vorgabe 40–50 %). */
+export const FRAME_WIDTH_FACTOR = 0.45;
 
-/** Zeichenhöhe relativ zur Feldbreite (Vorgabe: mindestens 35–40 %). */
-export const COORD_SIZE_FACTOR = { S: 0.38, M: 0.46, L: 0.55 } as const;
+/** Zeichenhöhe relativ zur RAHMENbreite (Vorgabe 50–60 %; S/L als Einstellung). */
+export const COORD_SIZE_FACTOR = { S: 0.48, M: 0.56, L: 0.62 } as const;
 
-/** Breite des Moos-/Steinrings relativ zur Feldbreite (muss die größte Glyphe samt Plättchen fassen). */
-export const FRAME_WIDTH_FACTOR = 0.8;
+export const FLAT_PITCH = -Math.PI / 2;
 
-export function coordinateLayout(squareSize: number, tiltDeg = COORD_TILT_DEG): CoordLabel[] {
+export function coordinateLayout(squareSize: number, orient: CoordOrientation = 'both'): CoordLabel[] {
   const s = squareSize;
-  const off = 4 * s + (FRAME_WIDTH_FACTOR * s) / 2 + s * 0.02; // Mitte des Rings
-  const pitch = -((90 - tiltDeg) * Math.PI) / 180;
+  const off = 4 * s + (FRAME_WIDTH_FACTOR * s) / 2; // Mitte des Rahmens
   const out: CoordLabel[] = [];
+  const yawOf = (r: 'w' | 'b') => (r === 'w' ? 0 : Math.PI);
+  const pick = (natural: 'w' | 'b'): 'w' | 'b' => (orient === 'both' ? natural : orient);
   for (let i = 0; i < 8; i++) {
     const c = (i - 3.5) * s;
-    // Linien: Weiß an +Z, Schwarz an −Z
-    out.push({ text: FILES[i], kind: 'file', index: i, reader: 'w', x: c, z: off, yaw: 0, pitch });
-    out.push({ text: FILES[i], kind: 'file', index: i, reader: 'b', x: c, z: -off, yaw: Math.PI, pitch });
-    // Reihen: Weiß links (−X), Schwarz links aus seiner Sicht (+X). Reihe i+1 liegt bei z = (3,5 − i)·s
-    out.push({ text: String(i + 1), kind: 'rank', index: i, reader: 'w', x: -off, z: (3.5 - i) * s, yaw: 0, pitch });
-    out.push({ text: String(i + 1), kind: 'rank', index: i, reader: 'b', x: off, z: (3.5 - i) * s, yaw: Math.PI, pitch });
+    const rz = (3.5 - i) * s; // Reihe i+1
+    const rankReader: 'w' | 'b' = i < 4 ? 'w' : 'b'; // zur näheren Grundreihe
+    for (const [kind, natural, x, z] of [
+      ['file', 'w', c, off], // untere Kante (Weiß)
+      ['file', 'b', c, -off], // obere Kante (Schwarz)
+      ['rank', rankReader, -off, rz], // linke Kante (aus Sicht von Weiß)
+      ['rank', rankReader, off, rz], // rechte Kante
+    ] as const) {
+      const reader = pick(natural);
+      out.push({ text: kind === 'file' ? FILES[i] : String(i + 1), kind, index: i, reader, x, z, yaw: yawOf(reader), pitch: FLAT_PITCH });
+    }
   }
   return out;
 }
@@ -60,16 +71,15 @@ export function squareLabelLayout(squareSize: number, reader: 'w' | 'b'): CoordL
   const inset = s * 0.36;
   const flip = reader === 'w' ? 1 : -1;
   const yaw = reader === 'w' ? 0 : Math.PI;
-  const pitch = -Math.PI / 2;
   const baseRank = reader === 'w' ? 0 : 7;
   const baseFile = reader === 'w' ? 0 : 7;
   for (let i = 0; i < 8; i++) {
     const fx = (i - 3.5) * s;
     const fz = (3.5 - baseRank) * s;
-    out.push({ text: FILES[i], kind: 'file', index: i, reader, x: fx + flip * inset, z: fz + flip * inset, yaw, pitch });
+    out.push({ text: FILES[i], kind: 'file', index: i, reader, x: fx + flip * inset, z: fz + flip * inset, yaw, pitch: FLAT_PITCH });
     const rx = (baseFile - 3.5) * s;
     const rz = (3.5 - i) * s;
-    out.push({ text: String(i + 1), kind: 'rank', index: i, reader, x: rx - flip * inset, z: rz - flip * inset, yaw, pitch });
+    out.push({ text: String(i + 1), kind: 'rank', index: i, reader, x: rx - flip * inset, z: rz - flip * inset, yaw, pitch: FLAT_PITCH });
   }
   return out;
 }

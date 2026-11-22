@@ -27,10 +27,6 @@ export interface Settings {
   insects: boolean;
   /** Easter Egg: Glühwürmchen landet auf ruhig gehaltener Hand (VR). */
   insectLanding: boolean;
-  /** Figurenkontrast: helle Kontur der schwarzen Figuren (Aus/Normal/Hoch). */
-  pieceContrast: 'off' | 'normal' | 'high';
-  /** Optional: dunkle Kontur für die weißen Figuren. */
-  whiteOutline: boolean;
   /** Komfort: Greifstrahl aus Controller/Hand nach vorne-unten (Sitzmodus, eingeschränkte Beweglichkeit). */
   grabRay: boolean;
   /** Lautstärke „Umgebung“ (Wind, Dschungel-Teppich, Pflanzen, Tropfen, Pilz-Summen). */
@@ -57,8 +53,6 @@ const DEFAULTS: Settings = {
   creaturesVolume: 0.6,
   insects: true,
   insectLanding: true,
-  pieceContrast: 'normal',
-  whiteOutline: false,
   grabRay: false,
   ambienceVolume: 0.6,
   sfxVolume: 0.9,

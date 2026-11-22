@@ -6,6 +6,8 @@
  */
 interface Spore { x: number; y: number; r: number; vx: number; vy: number; hue: number; ph: number }
 interface Shroom { x: number; h: number; w: number; hue: number; lean: number; ph: number }
+/** Lavalampen-Blase: steigt langsam vom unteren Rand auf, wabert, wird oben größer und blasser. */
+interface Lava { x: number; y: number; r: number; vy: number; hue: number; ph: number; life: number }
 
 export function startBackground(canvas: HTMLCanvasElement): () => void {
   const ctx = canvas.getContext('2d');
@@ -21,6 +23,11 @@ export function startBackground(canvas: HTMLCanvasElement): () => void {
   let raf = 0;
   let last = 0;
   let stars: { x: number; y: number; a: number }[] = [];
+  let lava: Lava[] = [];
+  const newLava = (fromBottom: boolean): Lava => ({
+    x: rnd(0.05, 0.95) * w, y: fromBottom ? h + rnd(20, 120) : rnd(0.2, 1) * h, r: rnd(18, 70), vy: rnd(9, 22),
+    hue: [320, 25, 172, 270][Math.floor(rnd(0, 4))], ph: rnd(0, 6.28), life: 0,
+  });
 
   const rnd = (a: number, b: number) => a + Math.random() * (b - a);
   const resize = () => {
@@ -37,6 +44,7 @@ export function startBackground(canvas: HTMLCanvasElement): () => void {
       x: ((i + rnd(0.1, 0.9)) / nS) * w, h: rnd(0.25, 0.62) * h, w: rnd(70, 190), hue: [175, 280, 320, 190][i % 4], lean: rnd(-0.12, 0.12), ph: rnd(0, 6.28),
     }));
     stars = Array.from({ length: Math.round((w * h) / 5000) }, () => ({ x: rnd(0, w), y: rnd(0, h * 0.6), a: rnd(0.2, 0.9) }));
+    lava = Array.from({ length: Math.max(5, Math.round(w / 220)) }, () => newLava(false));
     if (still) draw(0);
   };
 
@@ -66,6 +74,24 @@ export function startBackground(canvas: HTMLCanvasElement): () => void {
     ctx.beginPath();
     ctx.arc(gx, gy, gr, 0, Math.PI * 2);
     ctx.fill();
+    // Lavalampen-Blasen (hinter den Pilzen): weiche, wabernde, milchig leuchtende Formen
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of lava) {
+      const fade = Math.max(0, Math.min(1, b.y / (h * 0.35))) * Math.min(1, b.life / 2);
+      const wob = Math.sin(t * 0.0009 + b.ph);
+      const rx = b.r * (1 + 0.12 * wob);
+      const ry = b.r * (1.15 - 0.12 * wob);
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, Math.max(rx, ry));
+      g.addColorStop(0, `hsla(${b.hue},100%,70%,${0.32 * fade})`);
+      g.addColorStop(0.7, `hsla(${b.hue},100%,60%,${0.18 * fade})`);
+      g.addColorStop(1, 'hsla(0,0%,0%,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(b.x, b.y, rx, ry, Math.sin(t * 0.0004 + b.ph) * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
     // Pilze
     for (const m of shrooms) {
       const pulse = 0.65 + 0.35 * Math.sin(t * 0.0012 + m.ph);
@@ -122,6 +148,14 @@ export function startBackground(canvas: HTMLCanvasElement): () => void {
     if (document.hidden || t - last < 33) return; // ≤ 30 FPS, pausiert im Hintergrund-Tab
     const dt = Math.min(0.1, (t - last) / 1000);
     last = t;
+    for (let i = 0; i < lava.length; i++) {
+      const b = lava[i];
+      b.life += dt;
+      b.y -= b.vy * dt;
+      b.x += Math.sin(t * 0.0006 + b.ph) * 6 * dt;
+      if (b.y < h * 0.4) b.r += dt * 4; // oben größer …
+      if (b.y < -b.r) lava[i] = newLava(true); // … und dann aufgelöst
+    }
     for (const s of spores) {
       s.x += (s.vx + Math.sin(t * 0.0007 + s.ph) * 4) * dt;
       s.y += s.vy * dt;

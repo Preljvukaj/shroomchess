@@ -5,9 +5,10 @@ import {
   chorusIntensity,
   collectPitch,
   generateBedLoop,
+  pickRecipe,
   recipesFor,
 } from './insectSounds';
-import { type V3, chooseVoice, dopplerCents, flybyPath, lerp3 } from './mix';
+import { PRIORITY_WEIGHT, type V3, chooseVoice, dopplerCents, flybyPath, lerp3 } from './mix';
 
 /**
  * Prozedurale Klangwelt mit Web Audio (keine Audio-Dateien).
@@ -59,6 +60,9 @@ export class AudioEngine {
   private shortNoise: AudioBuffer | null = null;
   private pool: Voice[] = [];
   private hums: { panner: PannerNode; gain: GainNode }[] = [];
+  /** 3 feste Stimmen für das Brummen der nächsten Brummer */
+  private brummer: { panner: PannerNode; gain: GainNode; pos: V3 | null }[] = [];
+  private glugActive: number[] = [];
   private mix: Mix = { master: 0.7, sfx: 0.9, ambience: 0.6, creatures: 0.6, insects: true };
   private duckFactor = 1;
   private duckUntil = 0;
@@ -104,6 +108,7 @@ export class AudioEngine {
     this.buildAmbience();
     this.buildInsectBed();
     this.buildHums();
+    this.buildBrummer();
     this.onSubtitle?.('sfx.ambient');
   }
 
@@ -173,9 +178,9 @@ export class AudioEngine {
     wind.loop = true;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 450;
+    lp.frequency.value = 380;
     const wg = ctx.createGain();
-    wg.gain.value = 0.3;
+    wg.gain.value = 0.09; // deutlich leiser als zuvor (0,3)
     wind.connect(lp).connect(wg).connect(this.ambienceBus);
     wind.start();
     // Blätterrauschen der Böen (Bandpass), Pegel folgt der Böen-Hüllkurve
@@ -206,10 +211,19 @@ export class AudioEngine {
     const ctx = this.ctx!;
     this.bedGain = ctx.createGain();
     this.bedGain.gain.value = 0;
-    this.bedGain.connect(this.insectBus);
-    const loops: ['crickets' | 'hum' | 'trills', number, number, GainNode][] = [
+    // Grundteppich durch einen Tiefpass (7 kHz): nimmt Zischeln/Hiss heraus, Zirpen bleibt erhalten
+    const bedLp = ctx.createBiquadFilter();
+    bedLp.type = 'lowpass';
+    bedLp.frequency.value = 7000;
+    bedLp.Q.value = 0.5;
+    this.bedGain.connect(bedLp).connect(this.insectBus);
+    const ambLp = ctx.createBiquadFilter();
+    ambLp.type = 'lowpass';
+    ambLp.frequency.value = 6500;
+    ambLp.connect(this.ambienceBus);
+    const loops: ['crickets' | 'hum' | 'trills', number, number, AudioNode][] = [
       ['crickets', 64, 1.0, this.bedGain],
-      ['hum', 23, 0.9, this.ambienceBus], // Summen = Dschungel-Teppich (Umgebung)
+      ['hum', 23, 0.7, ambLp], // Summen = Dschungel-Teppich (Umgebung), ebenfalls tiefpassgefiltert
       ['trills', 37, 0.8, this.bedGain],
     ];
     loops.forEach(([kind, sec, gain, dest], i) => {
@@ -256,6 +270,69 @@ export class AudioEngine {
       gain.connect(panner);
       this.hums.push({ panner, gain });
     }
+  }
+
+  /** Tiefes, samtiges Brummen (Sägezahn tief gefiltert, langsames Tremolo) – je Brummer in der Nähe eine Stimme. */
+  private buildBrummer(): void {
+    const ctx = this.ctx!;
+    for (let i = 0; i < 3; i++) {
+      const panner = this.makePanner(0.6, 2.4);
+      panner.connect(this.insectBus);
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = 92 + i * 11;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 420;
+      const trem = ctx.createGain();
+      trem.gain.value = 0.7;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 18 + i * 3;
+      const lg = ctx.createGain();
+      lg.gain.value = 0.3;
+      lfo.connect(lg).connect(trem.gain);
+      o.connect(lp).connect(trem).connect(gain).connect(panner);
+      o.start();
+      lfo.start();
+      this.brummer.push({ panner, gain, pos: null });
+    }
+  }
+
+  /** Positionen der nächsten Brummer (≤ 3); Stimmen schwellen sanft an bzw. klingen ab. */
+  setBrummers(list: V3[]): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    this.brummer.forEach((b, i) => {
+      const p = list[i];
+      if (p && this.mix.insects) {
+        b.panner.positionX.value = p.x;
+        b.panner.positionY.value = p.y;
+        b.panner.positionZ.value = p.z;
+        if (!b.pos) b.gain.gain.setTargetAtTime(0.07, now, 0.6); // sanft anschwellen
+        b.pos = p;
+      } else if (b.pos) {
+        b.gain.gain.setTargetAtTime(0, now, 0.8); // sanft abklingen
+        b.pos = null;
+      }
+    });
+  }
+
+  /**
+   * Gluckern einer Lavalampen-Blase an ihrer Position (tief, weich, deutlich leiser als Insekten,
+   * stark gedämpft mit der Entfernung). Höchstens 2 gleichzeitig.
+   */
+  playGlug(pos: V3, soft: boolean): boolean {
+    const ctx = this.ctx;
+    if (!ctx) return false;
+    const now = ctx.currentTime;
+    this.glugActive = this.glugActive.filter((t) => t > now);
+    if (this.glugActive.length >= 2) return false;
+    const res = this.playAt('glug', () => pos, soft ? 0.02 : 0.035, this.ambienceBus, 0.8, undefined, 2.6);
+    if (res) this.glugActive.push(now + res.dur);
+    return !!res;
   }
 
   setSoundSpots(s: SoundSpots): void {
@@ -328,12 +405,12 @@ export class AudioEngine {
         this.applyMix(0.8);
       }
     }
-    // Böen: alle 8–25 s, 2 s an, 2–4 s halten, 3 s aus
+    // Böen: selten (alle 25–60 s) und leise, 2 s an, 2–4 s halten, 3 s aus
     if ((T.gust -= dt) <= 0) {
-      T.gust = 8 + Math.random() * 17;
+      T.gust = 25 + Math.random() * 35;
       const hold = 2 + Math.random() * 2;
       this.gustUntil = now + 2 + hold;
-      this.gustGain?.gain.setTargetAtTime(0.18 + 0.12 * Math.random(), now, 0.8);
+      this.gustGain?.gain.setTargetAtTime(0.05 + 0.04 * Math.random(), now, 0.8);
       this.gustGain?.gain.setTargetAtTime(0, now + 2 + hold, 1.2);
     }
     const targetWind = now < this.gustUntil ? 1 : 0;
@@ -389,12 +466,13 @@ export class AudioEngine {
    * Spielt ein zufälliges Rezept der Kategorie an einer (ggf. bewegten) Position. Stimmenvergabe mit
    * Priorität (nahe Klänge verdrängen ferne). Gibt die Detune-Parameter zurück (für Doppler) oder null.
    */
-  private playAt(category: CreatureCategory, getPos: () => V3, vol: number, bus: GainNode, refDist = 1, durOverride?: number): { params: AudioParam[]; start: number; dur: number } | null {
+  private playAt(category: CreatureCategory, getPos: () => V3, vol: number, bus: GainNode, refDist = 1, durOverride?: number, rolloff = 1.3): { params: AudioParam[]; start: number; dur: number } | null {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running' || !this.shortNoise) return null;
     const now = ctx.currentTime;
     const p0 = getPos();
-    const d0 = this.dist(p0);
+    // Priorität: Abstand × Gewicht der Klangart (nahe Insekten vor Blasen vor Fernem)
+    const d0 = this.dist(p0) * (PRIORITY_WEIGHT[category] ?? 1);
     const insect = category === 'flyby' || category === 'ground';
     if (insect && !this.mix.insects) return null;
     // Insekten: höchstens 8 gleichzeitig; insgesamt höchstens 12 (Pool)
@@ -410,8 +488,7 @@ export class AudioEngine {
       const old = voice.out;
       window.setTimeout(() => old.disconnect(), 200);
     }
-    const list = recipesFor(category);
-    const r = list[Math.floor(Math.random() * list.length)];
+    const r = pickRecipe(recipesFor(category), Math.random());
     const dur = durOverride ?? r.duration[0] + Math.random() * (r.duration[1] - r.duration[0]);
     const pitch = 1 + (Math.random() * 2 - 1) * 0.12;
     const v = vol * (0.6 + Math.random() * 0.6);
@@ -420,6 +497,7 @@ export class AudioEngine {
     voice.getPos = getPos;
     this.voiceIsInsect[vi] = insect;
     voice.panner.refDistance = refDist;
+    voice.panner.rolloffFactor = rolloff;
     voice.panner.disconnect();
     voice.panner.connect(insect ? this.insectBus : bus);
     voice.panner.positionX.value = p0.x;

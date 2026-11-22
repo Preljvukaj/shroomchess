@@ -22,8 +22,10 @@ export function createSky(): THREE.Mesh {
       varying vec3 vDir;
       void main(){
         vDir = normalize(position);
-        vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        gl_Position = p.xyww; // immer auf der Far-Plane
+        // Unendlich weit: nur die Kamera-Rotation anwenden (keine Translation) → identisch in beiden
+        // Augen, keine Parallaxe; xyww legt den Himmel exakt auf die Far-Plane (nie abgeschnitten).
+        vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * vDir, 1.0);
+        gl_Position = p.xyww;
       }`,
     fragmentShader: /* glsl */ `
       uniform float uTime; uniform vec3 uMoon1; uniform vec3 uMoon2; uniform vec3 uGiant; uniform vec3 uSunDir;
@@ -57,13 +59,15 @@ export function createSky(): THREE.Mesh {
         vec3 col = mix(vec3(0.03, 0.015, 0.07), vec3(0.006, 0.004, 0.02), smoothstep(0.0, 0.6, h));
         col += vec3(0.10, 0.03, 0.16) * exp(-abs(h) * 9.0);
 
-        // Nebel (Emissions- und Dunkelwolken)
-        vec2 np = vec2(atan(d.z, d.x) * 1.6, h * 3.2);
-        float n1 = fbm(np * 1.3 + vec2(0.0, uTime * 0.003));
-        float n2 = fbm(np * 2.7 + 7.1);
-        float band = exp(-pow((h - 0.35 + 0.25 * sin(np.x * 0.7)) * 2.4, 2.0));
+        // Nebel (Emissions- und Dunkelwolken) – 3D-Noise direkt auf dem Richtungsvektor.
+        // Früher: 2D-Noise auf dem Azimut-Winkel (arctan von z/x) → Sprung von +π auf −π in Richtung −X = Naht
+        // (und Strahlen am Zenit). Auf der Kugel gibt es so keine Umlaufkante mehr.
+        float n1 = fbm3(d * 2.4 + vec3(0.0, uTime * 0.003, 0.0));
+        float n2 = fbm3(d * 4.6 + 7.1);
+        float wave = fbm3(d * 1.2 + 3.3) - 0.5;
+        float band = exp(-pow((h - 0.35 + 0.5 * wave) * 2.4, 2.0));
         vec3 neb = mix(vec3(0.35, 0.05, 0.45), vec3(0.02, 0.35, 0.45), n2);
-        col += neb * pow(n1, 3.0) * band * 0.9 * smoothstep(-0.05, 0.15, h) * (1.0 - smoothstep(0.8, 0.97, h)); // am Zenit ausblenden (Pol-Artefakt)
+        col += neb * pow(n1, 3.0) * band * 0.9 * smoothstep(-0.05, 0.15, h);
 
         // Sterne: Zellen-Hash, funkelnd, Dunkelwolken dämpfen
         vec3 sp = d * 220.0;

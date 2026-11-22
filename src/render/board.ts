@@ -131,7 +131,8 @@ export class BoardView {
     }
     this.root.add(lightMesh, darkMesh);
 
-    // Moosring als Rahmen
+    // Brett-Rahmen aus Stein (wie bei einem echten Brett), Breite 45 % einer Feldbreite, Oberkante bündig
+    // mit den Feldern. Die Koordinaten sind darin flach eingelassen (render/coordinates.ts).
     const outer = 8 * s + 2 * FRAME_WIDTH_FACTOR * s;
     const inner = 8 * s + gap;
     const shape = new THREE.Shape();
@@ -139,40 +140,28 @@ export class BoardView {
     const hole = new THREE.Path();
     hole.moveTo(-inner / 2, -inner / 2).lineTo(-inner / 2, inner / 2).lineTo(inner / 2, inner / 2).lineTo(inner / 2, -inner / 2).closePath();
     shape.holes.push(hole);
-    const frameGeo = new THREE.ExtrudeGeometry(shape, { depth: h * 0.9, bevelEnabled: true, bevelThickness: h * 0.4, bevelSize: s * 0.06, bevelSegments: 3, curveSegments: 1 });
-    frameGeo.rotateX(-Math.PI / 2);
-    const moss = new THREE.ShaderMaterial({
-      uniforms: { ...worldUniforms },
-      vertexShader: `varying vec3 vW; varying vec3 vN; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); gl_Position = projectionMatrix * viewMatrix * w; }`,
-      fragmentShader: /* glsl */ `
-        uniform float uTime; uniform vec3 uTint; uniform float uTintAmt; varying vec3 vW; varying vec3 vN;
-        ${GLSL_NOISE}
-        void main(){
-          float n = fbm(vW.xz * 7.0);
-          float light = 0.35 + 0.65 * clamp(dot(normalize(vN), normalize(vec3(-0.4, 1.0, -0.3))), 0.0, 1.0);
-          vec3 c = mix(vec3(0.02, 0.07, 0.05), vec3(0.06, 0.2, 0.12), n) * light;
-          float tip = step(0.975, hash12(floor(vW.xz * 40.0)));
-          vec3 g = mix(vec3(0.5, 1.0, 0.4), uTint, uTintAmt);
-          c += g * tip * (0.5 + 0.5 * sin(uTime * 1.7 + hash12(floor(vW.xz*40.0)) * 20.0)) * 0.8;
-          gl_FragColor = vec4(c, 1.0);
-          #include <tonemapping_fragment>
-          #include <colorspace_fragment>
-        }`,
-    });
-    this.root.add(new THREE.Mesh(frameGeo, moss));
+    const bt = Math.min(0.006, h * 0.15);
+    const frameGeo = new THREE.ExtrudeGeometry(shape, { depth: h - bt, bevelEnabled: true, bevelThickness: bt, bevelSize: bt, bevelSegments: 2, curveSegments: 1 });
+    frameGeo.rotateX(-Math.PI / 2); // Extrusion zeigt nach +Y; Oberkante bei y = h
+    const frameTex = stoneTexture('moon', 3);
+    frameTex.wrapS = frameTex.wrapT = THREE.RepeatWrapping;
+    frameTex.repeat.set(1 / (s * 2), 1 / (s * 2));
+    const frameMat = new THREE.MeshStandardMaterial({ map: frameTex, color: '#5a5468', roughness: 0.55, metalness: 0.05, envMapIntensity: 0.6 });
+    this.root.add(new THREE.Mesh(frameGeo, frameMat));
 
     // Koordinaten: siehe render/coordinates.ts (SDF-Text, eigenes Modul)
 
 
     // Gebackener „Kontaktschatten“ / Lichtschein rund um das Brett
     const halo = new THREE.Mesh(
-      new THREE.PlaneGeometry(outer * 1.3, outer * 1.3).rotateX(-Math.PI / 2),
+      new THREE.PlaneGeometry(outer * 1.6, outer * 1.6).rotateX(-Math.PI / 2),
       new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
         uniforms: { uHalf: { value: outer / 2 } },
         vertexShader: `varying vec2 vP; void main(){ vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-        fragmentShader: `uniform float uHalf; varying vec2 vP; void main(){ vec2 d = max(abs(vP) - uHalf, 0.0); float a = exp(-length(d) * 3.0 / max(uHalf*0.25, 0.05)); gl_FragColor = vec4(vec3(0.03,0.16,0.16)*a*0.35, a*0.35); }`,
+        // „Lichtinsel“: weicher, leicht kühler Lichtschein des Hauptlichts auf dem Boden rund ums Brett
+        fragmentShader: `uniform float uHalf; varying vec2 vP; void main(){ vec2 d = max(abs(vP) - uHalf, 0.0); float a = exp(-length(d) * 2.2 / max(uHalf*0.3, 0.05)); gl_FragColor = vec4(vec3(0.16,0.2,0.26)*a*0.55, a*0.55); }`,
       }),
     );
     halo.position.y = 0.003; // über der Moos-Lichtung (0,0008), kein Z-Fighting

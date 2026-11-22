@@ -408,7 +408,7 @@ export class VRMode {
       case 'smaller':
       case 'bigger': {
         if (!this.placement || this.placement.mode !== 'roomscale') return;
-        const cur = this.placement.squareSize * 8;
+        const cur = this.placement.totalSide;
         this.manualSide = Math.min(this.placement.maxSide, Math.max(1.6, cur + (id === 'bigger' ? 0.4 : -0.4)));
         this.needsPlacement = true;
         return;

@@ -105,8 +105,9 @@ export function generateBedLoop(kind: 'crickets' | 'hum' | 'trills', seconds: nu
       l2 += 0.2 * (l1 - l2);
       r1 += 0.06 * (rnd() * 2 - 1 - r1);
       r2 += 0.2 * (r1 - r2);
-      L2[i] = l2 * 0.05 * mod;
-      R2[i] = r2 * 0.05 * mod;
+      // deutlich weniger Rauschanteil als zuvor (0,05): nur ein Hauch als Teppich, das Tonale trägt
+      L2[i] = l2 * 0.015 * mod;
+      R2[i] = r2 * 0.015 * mod;
     }
     for (let i = 0; i < x; i++) {
       const k = i / x;
@@ -142,7 +143,7 @@ export function generateBedLoop(kind: 'crickets' | 'hum' | 'trills', seconds: nu
  * Kategorien: Vorbeiflug (Insekten), Boden (Zirpen aus Wall/Vegetation), Pflanze (Blasen, Ranken,
  * Sporen), Tropfen (von Pilzhüten), Ruf (ferne, melodisch-komische Alien-Rufe).
  */
-export type CreatureCategory = 'flyby' | 'ground' | 'plant' | 'drip' | 'call';
+export type CreatureCategory = 'flyby' | 'ground' | 'plant' | 'drip' | 'call' | 'glug';
 
 /** Während `build()` gesammelte Tonhöhen-Parameter (Detune) – für Doppler-Verläufe. */
 let pitchCollector: AudioParam[] | null = null;
@@ -322,6 +323,26 @@ export const RECIPES: Recipe[] = [
     g.gain.exponentialRampToValueAtTime(0.001, t + d);
     noiseSrc(c, n, t, d).connect(filt(c, 'lowpass', 900 * p, 0.8)).connect(g).connect(o);
   } },
+  // --- Gluckern der Lavalampen-Blasen: tief, weiche Attacke, zähflüssig (8 Varianten) ---
+  ...[0, 1, 2, 3, 4, 5, 6, 7].map((v): Recipe => ({
+    id: `glugg-${v + 1}`,
+    category: 'glug',
+    duration: [0.35 + v * 0.03, 0.6 + v * 0.04],
+    build: (c, o, t, d, p) => {
+      const f0 = (70 + v * 14) * p;
+      const blobs = 1 + (v % 3);
+      for (let k = 0; k < blobs; k++) {
+        const st = t + k * (d / (blobs + 0.5));
+        const s = osc(c, v % 2 ? 'triangle' : 'sine', f0 * (1.6 - k * 0.15), st, d * 0.6);
+        s.frequency.setTargetAtTime(f0 * (0.75 - k * 0.05), st + 0.02, 0.06); // zäher Abwärtsbogen
+        const g = c.createGain();
+        g.gain.setValueAtTime(0, st);
+        g.gain.linearRampToValueAtTime(0.9 / (k + 1), st + 0.035); // weiche Attacke
+        g.gain.exponentialRampToValueAtTime(0.001, st + d * 0.55);
+        s.connect(filt(c, 'lowpass', 600, 0.7)).connect(g).connect(o);
+      }
+    },
+  })),
   // --- Tropfen von den Pilzhüten ---
   { id: 'tropfen', category: 'drip', duration: [0.15, 0.25], build: (c, o, t, _d, p) => {
     const s = osc(c, 'sine', 1900 * p, t, 0.08);
@@ -374,6 +395,21 @@ export const RECIPES: Recipe[] = [
 
 export function recipesFor(cat: CreatureCategory): Recipe[] {
   return RECIPES.filter((r) => r.category === cat);
+}
+
+/** Auswahlgewicht je Rezept (Mückensirren seltener). */
+export function recipeWeight(r: Recipe): number {
+  return r.id === 'muecke' ? 0.25 : 1;
+}
+
+export function pickRecipe(list: Recipe[], rnd: number): Recipe {
+  const total = list.reduce((s, r) => s + recipeWeight(r), 0);
+  let x = rnd * total;
+  for (const r of list) {
+    x -= recipeWeight(r);
+    if (x <= 0) return r;
+  }
+  return list[list.length - 1];
 }
 
 /**

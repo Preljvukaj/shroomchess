@@ -172,57 +172,6 @@ export function pieceGeometry(type: PieceSymbol, segments = 28): THREE.BufferGeo
 
 let materials: Record<Color, THREE.MeshPhysicalMaterial> | null = null;
 
-/**
- * Dauerhafte Kontur der Figuren als Rim-Light (Fresnel) im Material: eine schmale helle Kante an der
- * Silhouette – bei Schwarz kühles Weiß (#E8F4FF), bei Weiß optional dunkel. Kostet keinen
- * zusätzlichen Draw Call (Inverted Hull bräuchte 16 weitere). Helligkeit unter der Bloom-Schwelle.
- * Reihenfolge im Hervorhebungs-Zustand: Figur → heller Rand (innen) → farbige Outline (außen).
- */
-export const CONTRAST_WIDTH = { off: 0, normal: 0.2, high: 0.34 } as const;
-export type PieceContrast = keyof typeof CONTRAST_WIDTH;
-
-const rimUniforms: Record<Color, { uRimColor: { value: THREE.Color }; uRimWidth: { value: number } }> = {
-  b: { uRimColor: { value: new THREE.Color('#e8f4ff').multiplyScalar(0.72) }, uRimWidth: { value: CONTRAST_WIDTH.normal } },
-  w: { uRimColor: { value: new THREE.Color('#120e1c') }, uRimWidth: { value: 0 } },
-};
-
-/** Rim-Light in ein (ggf. geklontes) Figurenmaterial einbauen. */
-export function applyRim(mat: THREE.MeshPhysicalMaterial, color: Color): void {
-  const u = rimUniforms[color];
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uRimColor = u.uRimColor;
-    shader.uniforms.uRimWidth = u.uRimWidth;
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor;\nuniform float uRimWidth;')
-      .replace(
-        '#include <opaque_fragment>',
-        `#include <opaque_fragment>
-        if (uRimWidth > 0.0) {
-          float ndv = clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0);
-          float f = 1.0 - ndv;
-          // Anti-Flimmern: Kantenbreite über die Bildschirmableitung → Übergang nie schmaler als ~1,5 px
-          float fw = max(fwidth(f), 1e-4);
-          float lo = min(1.0 - uRimWidth, 1.0 - 1.5 * fw);
-          float hi = max(lo + 1.5 * fw, 1.0 - uRimWidth * 0.45);
-          float sharp = smoothstep(lo - fw, hi, f);
-          // In der Ferne weicher, stabiler Fresnel statt schmaler Kante (Subpixel-Bereich)
-          float dist = length(vViewPosition);
-          float soft = pow(f, 2.5) * 0.55;
-          float rim = mix(sharp, soft, smoothstep(4.0, 9.0, dist));
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, uRimColor, clamp(rim, 0.0, 1.0));
-        }`,
-      );
-  };
-  mat.customProgramCacheKey = () => `piece-rim-${color}`;
-  mat.needsUpdate = true;
-}
-
-/** Einstellung „Figurenkontrast“ (Aus/Normal/Hoch) und optional dunkle Kontur für Weiß. */
-export function setPieceContrast(level: PieceContrast, whiteOutline: boolean): void {
-  rimUniforms.b.uRimWidth.value = CONTRAST_WIDTH[level];
-  rimUniforms.w.uRimWidth.value = whiteOutline ? CONTRAST_WIDTH[level] * 0.8 : 0;
-}
-
 /** Weiß: Elfenbein/Perlmutt mit Klarlack und Irisieren. Schwarz: Obsidian. */
 export function pieceMaterials(high: boolean): Record<Color, THREE.MeshPhysicalMaterial> {
   if (materials) return materials;
@@ -241,19 +190,20 @@ export function pieceMaterials(high: boolean): Record<Color, THREE.MeshPhysicalM
       emissive: new THREE.Color('#2a2418'),
       emissiveIntensity: 0.25,
     }),
+    // Obsidian: keine Kontur mehr – Kontrast entsteht durch Licht (Hauptlicht, seitliches Kantenlicht,
+    // Environment-Reflexe). Grundfarbe leicht angehoben (#1A1822), damit Schattierung sichtbar wird;
+    // Rauheit 0,3 → weiche, formnachzeichnende Glanzlichter statt Spiegel.
     b: new THREE.MeshPhysicalMaterial({
-      color: '#100c16',
-      // etwas rauer als zuvor (0,12/0,05): sehr scharfe Glanzpunkte flimmern auf kleinen Rundungen (Specular-Aliasing)
-      roughness: 0.2,
-      metalness: 0.1,
-      clearcoat: 1,
-      clearcoatRoughness: 0.14,
-      emissive: new THREE.Color('#0d0420'),
-      emissiveIntensity: 0.5,
+      color: '#1a1822',
+      roughness: 0.3,
+      metalness: 0.15,
+      clearcoat: 0.6,
+      clearcoatRoughness: 0.28,
+      envMapIntensity: 1.35,
+      emissive: new THREE.Color('#0a0614'),
+      emissiveIntensity: 0.4,
     }),
   };
-  applyRim(materials.w, 'w');
-  applyRim(materials.b, 'b');
   return materials;
 }
 

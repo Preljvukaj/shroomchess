@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TABLE_SQUARE, orderPolygon, palmFacesHead, placeBoard, polygonArea, yawFacing } from '../src/xr/math/placement';
+import { maxHalfSideAt } from '../src/xr/math/boardFit';
 import { type V2, dist, forward, rotate, wrapAngle } from '../src/xr/math/vec2';
 
 const rect = (w: number, d: number): V2[] => [
@@ -25,10 +26,22 @@ describe('VR-Brettplatzierung', () => {
     }
   });
 
-  it('Roomscale: Größe und Lage aus der Boundary', () => {
+  it('Roomscale: Größe und Lage aus der Boundary (Brett + Rahmen)', () => {
     const p = placeBoard(rect(4, 3), { pos: { x: 0, z: 1 }, yaw: 0 }, 'w');
-    expect(p.squareSize).toBeCloseTo(0.25, 2);
+    expect(p.squareSize).toBeCloseTo(2 / (8 + 2 * 0.45), 2); // 2 m Kante inkl. Rahmen
     expect(p.height).toBe(0);
+  });
+
+  it('Brett plus Rahmen passen mit 0,5 m Sicherheitsabstand in die Boundary', () => {
+    const lShape = [{ x: 0, z: 0 }, { x: 6, z: 0 }, { x: 6, z: 2.6 }, { x: 2.6, z: 2.6 }, { x: 2.6, z: 6 }, { x: 0, z: 6 }];
+    for (const region of [rect(4, 3), rect(6, 5), lShape, rect(3.2, 3.2)]) {
+      const p = placeBoard(region, { pos: { x: 1, z: 1 }, yaw: 0 }, 'w');
+      if (p.mode !== 'roomscale') continue;
+      const total = p.squareSize * (8 + 2 * 0.45);
+      expect(total).toBeCloseTo(p.totalSide, 6);
+      // Quadrat inkl. Rahmen bei p.center/p.yaw passt mit Abstand 0,5 m
+      expect(maxHalfSideAt(region, p.center, p.yaw, 0.5)).toBeGreaterThanOrEqual(total / 2 - 1e-3);
+    }
   });
 
   it('Kleiner Raum → Tischmodus 45 cm vor dem Spieler, Weiß zum Spieler', () => {
@@ -55,9 +68,9 @@ describe('VR-Brettplatzierung', () => {
 
   it('Manuelle Größe: nie größer als die Boundary erlaubt', () => {
     const p = placeBoard(rect(6, 6), { pos: { x: 0, z: 2 }, yaw: 0 }, 'w', { manualSide: 99 });
-    expect(p.squareSize * 8).toBeLessThanOrEqual(p.maxSide + 1e-9);
-    const q = placeBoard(rect(6, 6), { pos: { x: 0, z: 2 }, yaw: 0 }, 'w', { manualSide: 2.4 });
-    expect(q.squareSize).toBeCloseTo(0.3, 6);
+    expect(p.totalSide).toBeLessThanOrEqual(p.maxSide + 1e-9);
+    const q = placeBoard(rect(6, 6), { pos: { x: 0, z: 2 }, yaw: 0 }, 'w', { manualSide: 2.67 });
+    expect(q.squareSize).toBeCloseTo(0.3, 2);
   });
 
   it('yawFacing', () => {
@@ -73,7 +86,7 @@ describe('Manuelle Flächeneinrichtung', () => {
     const poly = orderPolygon(shuffled);
     expect(polygonArea(poly)).toBeCloseTo(7.5, 6); // überschlagen wäre kleiner
     const p = placeBoard(poly, { pos: { x: 0, z: 1 }, yaw: 0 }, 'w');
-    expect(p.maxSide).toBeCloseTo(1.5, 2);
+    expect(p.maxSide).toBeCloseTo(1.5, 2); // Quadrat inkl. Rahmen
   });
 });
 

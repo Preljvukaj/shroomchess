@@ -5,6 +5,7 @@
  *  Mücken        Boids-Schwärme über dem Nebel am Wall
  *  Motten        kreisen um leuchtende Pilzhüte (Lichtanziehung)
  *  Libellen      schnelle Sprints zwischen Punkten am Hang, dazwischen Schweben
+ *  Brummer       dick, langsam, taumelnd; fliegen von Pilz zu Pilz und Stein zu Stein, landen kurz
  *
  * Sicherheitsregeln (in dieser Reihenfolge am Ende jedes Schritts erzwungen):
  *  1. nie unter den Boden
@@ -14,7 +15,7 @@
  *     und nichts fliegt direkt vor die Augen (Sichtkegel)
  */
 
-export type InsectKind = 'firefly' | 'midge' | 'moth' | 'dragonfly';
+export type InsectKind = 'firefly' | 'midge' | 'moth' | 'dragonfly' | 'bumble';
 
 export interface V3 {
   x: number;
@@ -33,6 +34,8 @@ export interface Agent {
   phase: number;
   /** >0: sitzt (Landung auf der Hand) noch so viele Sekunden */
   landed: number;
+  /** Brummer: >0 sitzt noch so viele Sekunden auf einem Pilz/Stein */
+  perchT: number;
 }
 
 export interface InsectEnv {
@@ -53,10 +56,12 @@ export interface InsectEnv {
   swarmCenters: V3[];
   /** Ruhig gehaltene Hand (Easter Egg) oder null. */
   landing: V3 | null;
+  /** Landepunkte der Brummer (Pilzhüte, Steinoberseiten). */
+  perches?: V3[];
 }
 
 export const MIN_HEAD_DIST = 0.6;
-export const SPEED: Record<InsectKind, number> = { firefly: 0.35, midge: 0.9, moth: 0.8, dragonfly: 3.2 };
+export const SPEED: Record<InsectKind, number> = { firefly: 0.35, midge: 0.9, moth: 0.8, dragonfly: 3.2, bumble: 0.55 };
 
 const len = (a: V3) => Math.hypot(a.x, a.y, a.z);
 const sub = (a: V3, b: V3): V3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
@@ -111,7 +116,7 @@ export function createAgents(counts: Record<InsectKind, number>, env: InsectEnv,
   const out: Agent[] = [];
   const mk = (kind: InsectKind, i: number): Agent => {
     const p = env.wallPoint(rng, kind === 'midge' ? 0.5 : 0.4, kind === 'firefly' ? 2.6 : 2.0);
-    return { kind, p, v: { x: 0, y: 0, z: 0 }, target: { ...p }, timer: rng() * 3, swarm: i % Math.max(1, env.swarmCenters.length), attractor: env.attractors.length ? Math.floor(rng() * env.attractors.length) : -1, phase: rng() * Math.PI * 2, landed: 0 };
+    return { kind, p, v: { x: 0, y: 0, z: 0 }, target: { ...p }, timer: rng() * 3, swarm: i % Math.max(1, env.swarmCenters.length), attractor: env.attractors.length ? Math.floor(rng() * env.attractors.length) : -1, phase: rng() * Math.PI * 2, landed: 0, perchT: 0 };
   };
   for (const kind of Object.keys(counts) as InsectKind[]) for (let i = 0; i < counts[kind]; i++) out.push(mk(kind, i));
   return out;
@@ -139,6 +144,14 @@ export function stepAgents(agents: Agent[], env: InsectEnv, dt: number, rng: () 
       }
       a.landed = 0;
       a.target = env.wallPoint(rng, 0.6, 2.2);
+    }
+    // Brummer sitzt gerade: still, bis die Zeit um ist (Kopf-Sperrzone gilt trotzdem)
+    if (a.kind === 'bumble' && a.perchT > 0) {
+      a.perchT -= dt;
+      a.v.x = a.v.y = a.v.z = 0;
+      enforceHeadClearance(a.p, a.v, env.head, env.minHeadDist);
+      if (a.perchT <= 0) a.timer = 0;
+      return;
     }
     a.timer -= dt;
     switch (a.kind) {
@@ -188,6 +201,28 @@ export function stepAgents(agents: Agent[], env: InsectEnv, dt: number, rng: () 
         } else addS(acc, sub(env.wallPoint(rng, 0.5, 2), a.p), 0.3);
         acc.x += (rng() - 0.5) * 3;
         acc.z += (rng() - 0.5) * 3;
+        break;
+      }
+      case 'bumble': {
+        // nächsten Landeplatz in der Nähe wählen (Pilz oder Stein), schwerfällig hinfliegen
+        const perches = env.perches ?? env.attractors;
+        if (a.timer <= 0 && perches.length) {
+          const near = perches.filter((q) => Math.hypot(q.x - a.p.x, q.z - a.p.z) < 7);
+          const pick = (near.length ? near : perches)[Math.floor(rng() * (near.length || perches.length))];
+          a.target = { x: pick.x, y: pick.y + 0.03, z: pick.z };
+          a.timer = 25;
+        }
+        const d = sub(a.target, a.p);
+        const l = len(d);
+        addS(acc, d, 1.4 / Math.max(0.4, l));
+        // Taumeln: träge, wackelige Flugbahn
+        acc.x += Math.sin(time * 3.1 + a.phase) * 0.9;
+        acc.y += Math.sin(time * 2.3 + a.phase * 2) * 0.6;
+        acc.z += Math.cos(time * 2.7 + a.phase) * 0.9;
+        if (l < 0.07) {
+          a.p = { ...a.target };
+          a.perchT = 1 + rng() * 2.5; // kurz landen
+        }
         break;
       }
       case 'dragonfly': {

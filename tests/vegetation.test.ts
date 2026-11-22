@@ -18,6 +18,8 @@ describe('Vegetation: Bodenkontakt (Toleranz 3 cm)', () => {
       expect(veg.grounded.length).toBeGreaterThan(200);
       // neue Flora ist dabei und steht ebenfalls auf dem Boden
       for (const k of ['bubble', 'tentacle', 'fan', 'coral', 'leaf', 'capsule', 'clumpA', 'clumpB']) expect(veg.grounded.some((o) => o.kind === `flora-${k}`), k).toBe(true);
+      // Steine: mindestens 6 verschiedene Arten platziert, ebenfalls mit Bodenkontakt
+      expect(new Set(veg.grounded.filter((o) => o.kind.startsWith('rock-')).map((o) => o.kind)).size).toBeGreaterThanOrEqual(6);
       const bad = veg.grounded.filter((o) => groundError(b, o.base, o.footRadius) > 0.03);
       expect(bad.map((o) => `${o.kind}@${o.base.x.toFixed(2)},${o.base.z.toFixed(2)}`)).toEqual([]);
       // und keines schwebt über der niedrigsten Stelle seiner Grundfläche

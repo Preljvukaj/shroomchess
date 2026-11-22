@@ -16,10 +16,12 @@ export interface BoardFit {
   center: V2;
   /** Drehung des Bretts um +Y (Bogenmaß, 0..π/2). */
   yaw: number;
-  /** Größte zulässige Kantenlänge (Spielfläche 8×8). */
+  /** Größte zulässige Kantenlänge (Brett inkl. Rahmen). */
   maxSide: number;
-  /** Tatsächlich verwendete Kantenlänge (≤ maxSide, ≤ 8·maxSquare). */
+  /** Kantenlänge der Spielfläche 8×8 (ohne Rahmen). */
   side: number;
+  /** Kantenlänge inkl. Rahmen (= side bei frameFactor 0). */
+  totalSide: number;
   squareSize: number;
   /** `table`, wenn die Feldgröße unter `minSquare` fällt. */
   mode: 'roomscale' | 'table';
@@ -30,9 +32,11 @@ export interface FitOptions {
   minSquare?: number; // Untergrenze Feldgröße, Standard 0,2 m
   maxSquare?: number; // Obergrenze für die automatische Größe, Standard 0,6 m
   tableSquare?: number; // Feldgröße im Tischmodus, Standard 0,06 m
+  /** Breite des Brett-Rahmens in Feldbreiten (je Seite). Brett + Rahmen müssen in die Boundary passen. */
+  frameFactor?: number;
 }
 
-const DEFAULTS: Required<FitOptions> = { margin: 0.5, minSquare: 0.2, maxSquare: 0.6, tableSquare: 0.06 };
+const DEFAULTS: Required<FitOptions> = { margin: 0.5, minSquare: 0.2, maxSquare: 0.6, tableSquare: 0.06, frameFactor: 0 };
 
 /** Abstand Punkt ↔ achsparalleles Quadrat [−h,h]² (0, wenn innen). */
 function pointBoxDistance(p: V2, h: number): number {
@@ -169,7 +173,7 @@ export function fitBoard(poly: V2[], options: FitOptions = {}): BoardFit {
   let yaw = wrapAngle(best.yaw) % (Math.PI / 2);
   if (yaw < 0) yaw += Math.PI / 2;
   const maxSide = 2 * best.h;
-  return withSide({ center: best.c, yaw, maxSide }, Math.min(maxSide, 8 * o.maxSquare), o);
+  return withSide({ center: best.c, yaw, maxSide }, Math.min(maxSide, (8 + 2 * o.frameFactor) * o.maxSquare), o);
 }
 
 /**
@@ -182,12 +186,12 @@ export function withSide(
   options: FitOptions = {},
 ): BoardFit {
   const o = { ...DEFAULTS, ...options };
-  const side = Math.max(0, Math.min(requestedSide, fit.maxSide));
-  if (side / 8 < o.minSquare) {
-    const tableSide = 8 * o.tableSquare;
-    return { ...fit, side: tableSide, squareSize: o.tableSquare, mode: 'table' };
+  const n = 8 + 2 * o.frameFactor; // Felder über die Gesamtbreite (inkl. Rahmen)
+  const total = Math.max(0, Math.min(requestedSide, fit.maxSide));
+  if (total / n < o.minSquare) {
+    return { ...fit, side: 8 * o.tableSquare, totalSide: n * o.tableSquare, squareSize: o.tableSquare, mode: 'table' };
   }
-  return { ...fit, side, squareSize: side / 8, mode: 'roomscale' };
+  return { ...fit, side: (total / n) * 8, totalSide: total, squareSize: total / n, mode: 'roomscale' };
 }
 
 /**

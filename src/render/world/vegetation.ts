@@ -3,6 +3,7 @@ import { distanceToPolygonEdge, pointInPolygon } from '../../xr/math/vec2';
 import type { QualityProfile } from '../scene';
 import { GLSL_FOG, PALETTE, mulberry32, safeMerge, worldUniforms } from '../shared';
 import { type Basin, regionRadius } from './basin';
+import { PEBBLE_COLORS, ROCK_COLORS, ROCK_FOOT, ROCK_HEIGHT, ROCK_KINDS, type RockKind, createRockMeshes } from './rocks';
 import { FLORA_FOOT, FLORA_HEIGHT, type FloraKind, floraGeometry, floraInstanceAttributes, floraMaterial, hangingStrands } from './flora';
 import { DETAIL, SPECIES, type SpeciesDef, attachInstanceAttributes, speciesGeometry, speciesMaterial } from './mushrooms';
 
@@ -335,6 +336,8 @@ export interface Vegetation {
   attractors: THREE.Vector3[];
   /** Bodennahe Punkte in der Vegetation (Zirp-Quellen der Insekten). */
   chirpSpots: THREE.Vector3[];
+  /** Steinoberseiten (Landepunkte der Brummer). */
+  rockTops: THREE.Vector3[];
   /** Klangquellen der Pflanzen und Pilze (für die Geräuschkulisse). */
   soundSpots: { bubbles: THREE.Vector3[]; vines: THREE.Vector3[]; giants: THREE.Vector3[]; drips: THREE.Vector3[]; leaves: THREE.Vector3[] };
   /** Alle platzierten Objekte (für Bodenkontakt-Test/Debug). */
@@ -454,6 +457,59 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
   placeFlora('leaf', Math.round(fl.leaf * 0.5), avgStart + 0.5, avgRim + 2, 0.9, 1.8, 1.2, 3);
   placeFlora('leaf', Math.round(fl.leaf * 0.5), avgRim - 0.5, avgRim + 14, 2.0, 4.0, 3.0, 5);
 
+  // --- Steine: am Hangfuß, auf den Hängen, oben am Rand; große Steine eher weiter außen ---
+  const rocks: { p: Placement; kind: number }[] = [];
+  const rockZones: [number, number, number, number, number][] = [
+    // Anzahlanteil, dMin, dMax, Skalierung min, max
+    [0.35, avgStart - 0.05, avgStart + 1.2, 0.5, 1.1],
+    [0.35, avgStart + 1.2, avgRim, 0.7, 1.6],
+    [0.3, avgRim - 0.5, avgRim + 10, 1.2, 2.8],
+  ];
+  for (const [share, dMin, dMax, s0, s1] of rockZones) {
+    for (const pt of clustered(Math.round(profile.rocks * share), dMin, dMax, 1.6, 3, 0.05, (t) => b.rimStart(t))) {
+      const kind = Math.floor(rng() * ROCK_KINDS.length);
+      const k: RockKind = ROCK_KINDS[kind];
+      // Nadeln und Balance-Türme eher groß und weiter draußen, Kiesel/Scheiben eher klein und vorne
+      const big = k === 'needle' || k === 'stack' || k === 'arch';
+      const s = (s0 + (s1 - s0) * rng()) * (big && dMin < avgStart + 1 ? 0.6 : 1);
+      const flat = k === 'disc' || k === 'pebbles' || k === 'blob';
+      const pl = groundPlace(b, rng, pt.x, pt.z, s * ROCK_HEIGHT[k], s * ROCK_FOOT[k], flat ? { align: 'normal' } : { maxTiltDeg: 10, jitterDeg: 8 });
+      pl.scale = s;
+      rocks.push({ p: pl, kind });
+      record(`rock-${k}`, pl, s * ROCK_HEIGHT[k]);
+    }
+  }
+  const rockTops: THREE.Vector3[] = rocks
+    .filter((r) => ROCK_HEIGHT[ROCK_KINDS[r.kind]] * r.p.scale > 0.3)
+    .map((r) => r.p.pos.clone().add(new THREE.Vector3(0, ROCK_HEIGHT[ROCK_KINDS[r.kind]] * r.p.scale * 0.9, 0)));
+  {
+    // feine LOD-Stufe nur auf High und nur für die nahen Steine; sonst grob
+    const m = new THREE.Matrix4();
+    const items = rocks.map((r) => {
+      const k = ROCK_KINDS[r.kind];
+      const lod = (profile.rockNearDetail && lodSlots(b, r.p.pos.x, r.p.pos.z, 1)[0].lod === 0 ? 0 : 1) as 0 | 1;
+      const h = Math.abs(Math.sin(r.p.pos.x * 12.9 + r.p.pos.z * 78.2) * 43758.5) % 1;
+      const pal = k === 'pebbles' ? PEBBLE_COLORS : ROCK_COLORS;
+      const color = debugGround() && groundError(b, r.p.pos, r.p.foot) > 0.03 ? new THREE.Color(6, 0, 0) : pal[Math.floor(h * pal.length)];
+      return { kind: k, lod, matrix: m.clone().compose(r.p.pos, r.p.quat, new THREE.Vector3(r.p.scale, r.p.scale, r.p.scale)), color };
+    });
+    if (items.length) group.add(createRockMeshes(items));
+  }
+  // einige größere Steine von Mini-Pilzen/Moos umwachsen
+  for (const r of rocks.filter((x) => x.p.scale > 1.2).slice(0, 12)) {
+    for (let k = 0; k < 2; k++) {
+      const a = rng() * Math.PI * 2;
+      const d = ROCK_FOOT[ROCK_KINDS[r.kind]] * r.p.scale + 0.15;
+      const x = r.p.pos.x + Math.cos(a) * d;
+      const z = r.p.pos.z + Math.sin(a) * d;
+      if (b.distOutside(x, z) < b.rimStart(b.thetaOf(x, z)) - 0.1) continue;
+      const pl = groundPlace(b, rng, x, z, 0.25 * 0.8, 0.4 * 0.8, { align: 'normal' });
+      pl.scale = 0.8;
+      floraInst.clumpA.push(pl);
+      record('flora-clumpA', pl, 0.2);
+    }
+  }
+
   for (const kind of floraKinds) {
     const perLod: { p: Placement; slot: LodSlot }[][] = [[], [], []];
     for (const p of floraInst[kind]) for (const slot of lodSlots(b, p.pos.x, p.pos.z, MAXLOD[kind])) perLod[slot.lod].push({ p, slot });
@@ -561,7 +617,7 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
     leaves: floraInst.leaf.slice(0, 24).map((p) => p.pos.clone().add(new THREE.Vector3(0, 1.0 * p.scale, 0))),
   };
 
-  return { group, attractors, chirpSpots, soundSpots, grounded };
+  return { group, attractors, chirpSpots, soundSpots, grounded, rockTops };
 }
 
 /** Leuchtende Ranken vom Rand den Hang hinunter, dem Gelände folgend. */

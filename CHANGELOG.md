@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.0 – Licht statt Konturen, Steinrahmen, Steine, Lavalampen-Blasen, Brummer, ruhigerer Klang
+
+- **Himmel ohne Naht:** Die Naht kam vom Nebel. Er war als 2D-Noise über den Azimut (`atan`) berechnet, und der springt in −X von +π
+  auf −π. Jetzt ist es 3D-Noise über die Blickrichtung, und der Himmel wird „im Unendlichen“ gezeichnet (nur Rotation der Kamera),
+  also in beiden Augen identisch. Gasriese, Monde, Sterne und Nebel bleiben.
+- **Licht statt weißer Kontur:** Kontur und Einstellung „Figurenkontrast“ (inkl. dunkler Kontur für Weiß) entfernt. Neu: Lichtinsel
+  über dem Brett (Key-Light schräg von oben), farbiges Randlicht von der Seite, PMREM-Umgebungsreflexionen, Schwarz #1A1822 mit
+  Klarlack (Rauheit 0,3), weiche Kontaktschatten unter jeder Figur. Genau 2 Echtzeit-Lichter, die Umgebung bleibt dunkler als das Brett.
+  Die Spielerfarben-Markierung beim Greifen bleibt.
+- **Steinrahmen mit eingelassener Beschriftung:** Rahmen 45 % einer Feldbreite, Koordinaten flach, kursiv, warm leuchtend mit
+  langsamem Puls. Jede Seite ist für ihren Spieler lesbar, gegen Engine/Lichess folgt die Beschriftung der eigenen Farbe.
+  Die Brettgröße rechnet den Rahmen mit ein. Die alten Moosring-Beschriftungen sind entfernt.
+- **Steine:** 8 Arten (geschmolzene Klumpen, Balance-Türme, Ringe/Bögen, Nadeln, gewellte Scheiben, Schwamm-/Lavasteine, geäderte
+  Kristallsteine, Pastell-Kiesel). Violett, Türkis, Ocker, Rostorange, Pink, Petrol, Elfenbein, teils mit Schichtbändern und
+  leuchtenden Adern. Sie liegen nur außerhalb der Spielfläche, teils halb versunken, die großen weiter draußen, alle mit Bodenkontakt.
+- **Lavalampen-Blasen:** weich leuchtende, wabernde Formen (0,3–2 m). Sie wölben sich an Quellen außerhalb der Spielfläche hervor,
+  lösen sich ab, steigen taumelnd auf, teilen oder vereinen sich und lösen sich hoch oben auf. Abstand zur Spielfläche und zu Köpfen
+  immer mindestens 1,5 m. 8/14/20 Blasen je Qualitätsstufe. Auch im Hintergrund der Startseite.
+- **Mehr Insekten und Brummer:** 60/180/400 statt 30/80/200, mehr Mückenschwärme und Motten. Neu sind die „Brummer“: dick, samtig,
+  2–5 cm, orange-violett gestreift oder petrol, taumeln von Pilz zu Pilz und Stein zu Stein und landen kurz. Jeder in der Nähe hat sein
+  eigenes tiefes Brummen. Bei zu wenig FPS wird die Insektenzahl automatisch reduziert (und später wieder erhöht).
+- **Klang ruhiger:** Wind etwa 3× leiser und Böen nur noch alle 25–60 s. Der Grundteppich läuft durch einen Tiefpass (7 kHz), das Summen
+  hat weniger Rauschanteil, das Mückensirren kommt seltener. Neu ist weiches, tiefes Gluckern beim Ablösen der Blasen und gelegentlich
+  beim Teilen/Vereinen: 8 Varianten, höchstens 2 gleichzeitig, mindestens 2–4 s Pause je Quelle, starke Entfernungsdämpfung.
+  Vorrang der Stimmen: nahe Insekten/Brummer, dann Blasen, dann Fernes.
+- **Tests:** 114 (vorher 100). Neu: Beschriftung flach mit Normale nach oben und richtig orientiert, Brett plus Rahmen passt mit
+  Abstand, Blasenquellen und -bahnen nie in der Spielfläche oder in Kopfnähe, Bodenkontakt von Steinen und Quellen, Himmel als eine
+  Geometrie ohne Azimut-Naht, Brummer-Landungen, Gluckervarianten, weniger Rauschen. Die alten Tests zur gekippten Beschriftung und
+  zur weißen Kontur sind entfernt.
+
 ## 0.5.0 – Greif-Säule, ruhige Kontur, Erde & Moos, Alien-Flora, dichte Geräuschkulisse
 
 - **Greifen ohne Bücken:** Hand irgendwo über der eigenen Figur (bis 2 m Höhe) → greifbar, mit Sporenfaden zur Figur. Greifen lässt sie in

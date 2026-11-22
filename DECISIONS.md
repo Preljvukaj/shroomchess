@@ -351,3 +351,54 @@ und Farne reduziert. High (Desktop) 100 / 1,5 Mio. Die FPS auf der Quest sind ni
 - **Weitere Ebenen:** Pilz-Summen über 3 feste Stimmen an den nächsten Riesenpilzen, Windböen mit Blätterrauschen (synchron zum Wiegen der Vegetation),
   kurze Stille vor fernen Rufen, Dichte schwankt über Minuten.
 - **Stimmen:** Pool aus 12 HRTF-Pannern, Vergabe mit Priorität (nahe Klänge verdrängen ferne).
+
+## Änderungsrunde 5 (Himmel, Licht, Rahmen, Steine, Blasen, Brummer, Klang)
+
+**D54 – Ursache der Himmelsnaht (`src/render/world/sky.ts`):** Der Nebel nutzte 2D-Noise mit dem Azimut `atan(d.z, d.x)` als Koordinate.
+In −X springt der Wert von +π auf −π, dort lag die sichtbare Kante. Lösung: Nebel als 3D-Noise über die normierte Blickrichtung (kein Winkel,
+keine Textur), und der Vertex-Shader nimmt nur die Rotation der Kamera (`mat3(viewMatrix)`, `gl_Position = p.xyww`). Damit ist der
+Himmel unendlich weit weg und garantiert für beide Augen identisch (vorher war er eine Kugel endlicher Größe mit minimaler Parallaxe). Geprüft im Headless-Browser: Der Spaltensprung Richtung −X ist maximal 0,69
+(Median 0,24), in der Vergleichsrichtung +Z mit Gasriese 4,39. Es gibt keine Naht mehr. Der Unit-Test prüft eine einzige
+Kugel-Geometrie ohne `atan`, Texturen oder UVs.
+
+**D55 – Licht statt Kontur:** Kontrast entsteht nur noch durch Licht. Das Hemisphärenlicht und das Mondlicht sind entfernt, dafür
+gibt es ein Key-Light (schräg von oben, kühlweiß) und ein Randlicht (Türkis, flach von der Seite), beide mit dem Brett gedreht.
+Das Randlicht wirkt von beiden Spielerseiten, weil es quer zur Spielrichtung steht. Dazu eine eigene PMREM-Umgebung: dunkle Kugel
+mit heller „Öffnung“ oben und farbigen Streifen, die auf dem Klarlack von Schwarz als Glanzkanten erscheinen. Die Kontaktschatten
+sind weiche Blob-Schatten (1 InstancedMesh, polygonOffset). Eine Shadow-Map hätte pro Figurenmesh einen weiteren Pass gekostet
+(+12 Calls) und auf der Quest Aliasing erzeugt. Die Lichtinsel ist ein kühler, additiver Lichthof unter dem Brett.
+
+**D56 – Steinrahmen und Beschriftung (`board.ts`, `coordLayout.ts`, `coordinates.ts`):** Rahmenbreite 0,45 Feldbreiten
+(`FRAME_WIDTH_FACTOR`), Zeichenhöhe 48/56/62 % davon (S/M/L). Die Labels liegen flach (Normale nach oben) als BatchedText mit
+Cormorant Garamond Bold Italic. Die SDF-Kanten bleiben bei jeder Größe scharf, und der leichte Glanz kommt aus der Farbe statt aus
+Bloom-Überstrahlung. Reihenzahlen 1–4 sind zu Weiß gedreht, 5–8 zu Schwarz (zur näheren Grundreihe). Im Modus mit fester Farbe
+sind alle Labels zu dieser Farbe gedreht. Das Brett-Fitting rechnet mit 8 + 2·0,45 Feldern; `totalSide` wird für Menü und Grenzen genutzt.
+
+**D57 – Steine (`rocks.ts`):** 8 Arten aus verformten Grundkörpern mit festem Seed, Ursprung = Bodenkontakt, platziert über
+`groundPlace` (Prüfung ≤ 3 cm). Je Art und LOD-Stufe ein InstancedMesh mit Instanzfarbe, Bänder und Adern im Shader. Ein BatchedMesh
+(1 Call) wurde verworfen, weil es ohne `WEBGL_multi_draw` (Headless, teils Mobile) auf einen Call pro Instanz zurückfällt. Ein
+gemeinsamer Puffer mit „weggefalteten“ Vertices wurde ebenfalls verworfen, weil er pro Instanz alle 8 Arten im Vertex-Shader
+verarbeitet (+105k Dreiecke auf Low). Auf Low/Medium gibt es nur die grobe Stufe (8 Calls), auf High zusätzlich die feine Stufe für nahe Steine.
+
+**D58 – Lavalampen-Blasen (`lavaSim.ts`, `lavaBubbles.ts`):** Die Simulation ist reines TypeScript ohne Three.js und darum testbar.
+Sicherheit über eine harte Bedingung nach jedem Schritt: Abstand zur Spielfläche ≥ 1,5 m + Radius (die Köpfe sind in der
+Spielfläche) und zusätzlich ≥ 1,5 m + Radius zu jedem Kopf. Gerendert wird ein InstancedMesh (Icosphäre, Verformung im
+Vertex-Shader: Streckung, oben breiter, Einschnürung beim Hervorquellen, Noise-Wabern). Die ≤ 20 Instanzen werden jedes Frame von
+hinten nach vorne sortiert, damit die Transparenz stimmt. Kein Echtzeitlicht, kein Metaball-Raymarching: Das war optional und hätte
+einen Vollbild-Pass gekostet.
+
+**D59 – Brummer und Insektendichte:** Brummer sind eine eigene Art im Insektenhirn mit Landeplätzen auf Pilzhüten und
+Steinoberseiten, taumelnder Beschleunigung, Landedauer 1–3,5 s und max. 0,55 m/s. Die Kopf-Sperrzone (0,6 m) gilt auch im Sitzen.
+Die Agenten werden gemischt angeordnet, damit die automatische Reduktion (Präfix der aktiven Agenten) alle Arten anteilig trifft.
+Ein FPS-Wächter senkt die Zahl nach 3 s unter 90 % der Zielrate um 25 % (min. 20 %) und hebt sie nach 10 s stabiler Rate wieder an.
+
+**D60 – Klang ruhiger, Gluckern, Prioritäten:** Wind 0,3 → 0,09, Böen alle 25–60 s mit halber Stärke. Tiefpass 7 kHz auf dem
+Insekten-Teppich und 6,5 kHz auf dem Umgebungs-Summen, Rauschanteil im Summen 0,05 → 0,015. Das Mückensirren hat Auswahlgewicht 0,25.
+Gluckern: 8 Rezepte (gefilterte Sinus-/Dreieck-„Blobs“ mit weichem Abwärtsbogen) auf dem Umgebungs-Bus, max. 2 gleichzeitig, 2–4 s
+Pause je Quelle, Rolloff 2,6. Brummen: 3 feste, tief gefilterte Sägezahn-Stimmen mit Tremolo für die nächsten Brummer (< 5 m),
+sanft ein- und ausgeblendet. Priorität im Stimmen-Pool: Abstand × Gewicht (Insekten 1, Gluckern 1,6, Pflanzen/Tropfen 2, Fernrufe 3).
+Spiel-Sounds laufen auf einem eigenen Bus und haben immer Vorrang.
+
+Messung (Headless, Draw Calls / Dreiecke): Low 93 / 301k, Medium 96 / 541k, High 117 / 1,59 Mio. Reduzieren war nicht nötig.
+Auf der Quest regelt zusätzlich der FPS-Wächter die Insekten. Die Quest-FPS selbst sind nicht gemessen.
+

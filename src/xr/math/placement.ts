@@ -1,3 +1,4 @@
+import { FRAME_WIDTH_FACTOR } from '../../render/coordLayout';
 import { type BoardFit, type FitOptions, alignYaw, fitBoard, withSide } from './boardFit';
 import { type V2, add, forward, scale, sub, wrapAngle } from './vec2';
 
@@ -25,8 +26,10 @@ export interface BoardPlacement {
   height: number;
   squareSize: number;
   mode: 'roomscale' | 'table';
-  /** größte zulässige Kantenlänge (für manuelles Verkleinern) */
+  /** größte zulässige Kantenlänge inkl. Rahmen (für manuelles Verkleinern) */
   maxSide: number;
+  /** aktuelle Kantenlänge inkl. Rahmen */
+  totalSide: number;
   /** Grund für den Tischmodus (für den Hinweis an den Spieler) */
   reason: 'fits' | 'small-room' | 'seated';
 }
@@ -49,8 +52,10 @@ export function placeBoard(
   color: 'w' | 'b',
   opts: { seated?: boolean; manualSide?: number; fit?: FitOptions } = {},
 ): BoardPlacement {
-  const fit: BoardFit = fitBoard(region, opts.fit);
-  const sized = opts.manualSide !== undefined ? withSide(fit, opts.manualSide, opts.fit) : fit;
+  // Brett + Steinrahmen müssen mit dem Sicherheitsabstand in die Boundary passen
+  const fitOpts: FitOptions = { frameFactor: FRAME_WIDTH_FACTOR, ...opts.fit };
+  const fit: BoardFit = fitBoard(region, fitOpts);
+  const sized = opts.manualSide !== undefined ? withSide(fit, opts.manualSide, fitOpts) : fit;
   if (opts.seated || sized.mode === 'table') {
     const center = add(player.pos, scale(forward(player.yaw), TABLE_DISTANCE));
     return {
@@ -60,6 +65,7 @@ export function placeBoard(
       squareSize: TABLE_SQUARE,
       mode: 'table',
       maxSide: fit.maxSide,
+      totalSide: TABLE_SQUARE * (8 + 2 * FRAME_WIDTH_FACTOR),
       reason: opts.seated ? 'seated' : 'small-room',
     };
   }
@@ -70,6 +76,7 @@ export function placeBoard(
     squareSize: sized.squareSize,
     mode: 'roomscale',
     maxSide: fit.maxSide,
+    totalSide: sized.totalSide,
     reason: 'fits',
   };
 }

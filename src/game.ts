@@ -13,7 +13,7 @@ import { downloadPgn, importPgnToLichess } from './lichess/export';
 import { getToken } from './lichess/auth';
 import { BoardScene } from './render/boardScene';
 import { InteractionController } from './render/interaction';
-import { PLAYER_GLOW, setPieceContrast } from './render/pieces';
+import { PLAYER_GLOW } from './render/pieces';
 import { SceneContext } from './render/scene';
 import { worldUniforms } from './render/shared';
 import { createWorld, squareRegion } from './render/world';
@@ -111,6 +111,19 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
   ctx.scene.add(insects.root);
   // (Greif-Säulen-Fäden werden nach dem Interaction-Controller hinzugefügt)
 
+  /** Gluckern der Lavalampen-Blasen: an ihrer Quelle, pro Quelle mindestens 2–4 s Abstand. */
+  const lastGlug = new Map<number, number>();
+  function hookLava(): void {
+    world.lava.onEvent = (e) => {
+      const now = performance.now() / 1000;
+      const gap = 2 + ((e.source * 0.37) % 1) * 2;
+      if (now - (lastGlug.get(e.source) ?? -99) < gap) return;
+      if (e.type !== 'detach' && Math.random() < 0.5) return; // Teilen/Verschmelzen nur gelegentlich
+      if (audio.playGlug({ x: e.x, y: e.y, z: e.z }, e.type !== 'detach')) lastGlug.set(e.source, now);
+    };
+  }
+  hookLava();
+
   /**
    * Welt (Senke, Vegetation) und Insekten für eine neue Spielfläche neu bauen und das Brett
    * dort platzieren (VR: Boundary des Spielers; zurück am Desktop: virtuelle Fläche).
@@ -120,6 +133,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     board.root.position.set(pose.x, pose.height, pose.z);
     board.root.rotation.set(0, pose.yaw, 0);
     board.root.scale.setScalar(k);
+    ctx.placeLights(new THREE.Vector3(pose.x, pose.height, pose.z), pose.yaw, Math.max(0.3, k));
     interaction.distanceScale = THREE.MathUtils.clamp(k * 1.3, 0.2, 1);
     const tint = world.tintState();
     disposeObject(world.root);
@@ -134,6 +148,7 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     });
     ctx.scene.add(insects.root);
     audio.setSoundSpots(world.soundSpots);
+    hookLava();
     applySettings();
   }
 
@@ -271,8 +286,8 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     board.highlights.colorblind = s.colorblind;
     board.highlights.refreshPalette();
     board.markNoLegalMoves = s.markNoLegalMoves;
-    board.coords.apply(s, viewSide);
-    setPieceContrast(s.pieceContrast, s.whiteOutline);
+    // Beschriftung: Hot-Seat → jede Seite für ihren Spieler; Einzelspieler/Lichess → für die eigene Farbe
+    board.coords.apply(s, viewSide, isEngine || isLichess ? human : 'both');
     audio.setMix({ master: s.volume, sfx: s.sfxVolume, ambience: s.ambienceVolume, creatures: s.creaturesVolume, insects: s.insects });
     insects.setEnabled(s.insects, s.insectLanding);
   }
@@ -404,7 +419,28 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
   const head = new THREE.Vector3();
   const fwd = new THREE.Vector3();
   const up = new THREE.Vector3();
+  // FPS-Wächter: zu wenig Bildrate → zuerst die Insektenanzahl automatisch reduzieren
+  let fpsEma = 60;
+  let lowFor = 0;
+  let okFor = 0;
   ctx.onFrame((dt, time) => {
+    if (dt > 0) fpsEma += (1 / dt - fpsEma) * 0.05;
+    const target = vr?.active ? 72 : 55;
+    if (fpsEma < target * 0.9) {
+      lowFor += dt;
+      okFor = 0;
+      if (lowFor > 3 && insects.activeFraction > 0.21) {
+        insects.setActiveFraction(insects.activeFraction * 0.75);
+        lowFor = 0;
+      }
+    } else if (fpsEma > target * 0.98) {
+      okFor += dt;
+      lowFor = 0;
+      if (okFor > 10 && insects.activeFraction < 1) {
+        insects.setActiveFraction(insects.activeFraction * 1.15);
+        okFor = 0;
+      }
+    }
     if (vr?.active) {
       vr.update(dt, time);
     } else {
@@ -418,8 +454,8 @@ export async function startGame(app: HTMLElement, ui: HTMLElement, cfg: GameConf
     board.update(dt, time);
     board.root.getWorldPosition(boardCenter);
     board.coords.update(dt, ctx.camera, boardCenter, ctx.renderer.xr.isPresenting);
-    world.update(dt);
     ctx.camera.getWorldPosition(head);
+    world.update(dt, head, [head]);
     ctx.camera.getWorldDirection(fwd);
     up.set(0, 1, 0).applyQuaternion(ctx.camera.getWorldQuaternion(new THREE.Quaternion()));
     audio.setListener(head, fwd, up);

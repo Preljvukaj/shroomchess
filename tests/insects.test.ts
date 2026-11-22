@@ -25,6 +25,8 @@ function makeEnv(rng: () => number, head: V3): InsectEnv {
     boardHalf: 2.4,
     pieceTop: 1.25,
     attractors: [{ x: 4.5, y: 1.5, z: 0 }, { x: -4.6, y: 1.2, z: 1 }, { x: 0, y: 2, z: 5 }],
+    // Landeplätze der Brummer – einer absichtlich direkt in Kopfnähe (darf trotzdem nie < 0,6 m werden)
+    perches: [{ x: 4.4, y: 0.5, z: 0.3 }, { x: -4.2, y: 0.8, z: -1 }, { x: 3.2, y: 1.6, z: 0.2 }],
     swarmCenters: [{ x: 4.5, y: 1, z: 2 }, { x: -4.5, y: 1, z: -2 }],
     landing: null,
     ...{ rng },
@@ -51,7 +53,7 @@ describe('Insekten: Mindestabstand zum Kopf', () => {
     const rng = lcg(7);
     const head: V3 = { x: 0, y: 1.65, z: 2.8 };
     const env = makeEnv(rng, head);
-    const agents = createAgents({ firefly: 40, midge: 50, moth: 30, dragonfly: 20 }, env, rng);
+    const agents = createAgents({ firefly: 40, midge: 50, moth: 30, dragonfly: 20, bumble: 20 }, env, rng);
     let minD = Infinity;
     for (let step = 0; step < 3000; step++) {
       const t = step / 60;
@@ -70,7 +72,7 @@ describe('Insekten: Mindestabstand zum Kopf', () => {
   it('nur Glühwürmchen über dem Brett, und dann in sicherer Höhe', () => {
     const rng = lcg(3);
     const env = makeEnv(rng, { x: 0, y: 1.65, z: 8 });
-    const agents = createAgents({ firefly: 50, midge: 30, moth: 20, dragonfly: 20 }, env, rng);
+    const agents = createAgents({ firefly: 50, midge: 30, moth: 20, dragonfly: 20, bumble: 15 }, env, rng);
     for (let step = 0; step < 2000; step++) {
       stepAgents(agents, env, 1 / 60, rng, step / 60);
       for (const a of agents) {
@@ -87,7 +89,7 @@ describe('Insekten: Mindestabstand zum Kopf', () => {
     const env = makeEnv(rng, { x: 0, y: 1.65, z: 8 });
     env.board = { x: 0.8, z: -0.6, yaw: 0.6, baseY: 0 };
     env.boardHalf = 1.6;
-    const agents = createAgents({ firefly: 30, midge: 30, moth: 20, dragonfly: 20 }, env, rng);
+    const agents = createAgents({ firefly: 30, midge: 30, moth: 20, dragonfly: 20, bumble: 10 }, env, rng);
     for (let step = 0; step < 1500; step++) {
       stepAgents(agents, env, 1 / 60, rng, step / 60);
       for (const a of agents) {
@@ -101,5 +103,24 @@ describe('Insekten: Mindestabstand zum Kopf', () => {
         }
       }
     }
+  });
+});
+
+describe('Brummer', () => {
+  it('fliegen von Landeplatz zu Landeplatz, landen kurz und starten wieder', () => {
+    const rng = lcg(21);
+    const env = makeEnv(rng, { x: 0, y: 1.65, z: -8 });
+    const agents = createAgents({ firefly: 0, midge: 0, moth: 0, dragonfly: 0, bumble: 6 }, env, rng);
+    let landings = 0;
+    const wasPerched = agents.map(() => false);
+    for (let step = 0; step < 60 * 90; step++) {
+      stepAgents(agents, env, 1 / 60, rng, step / 60);
+      agents.forEach((a, i) => {
+        if (a.perchT > 0 && !wasPerched[i]) landings++;
+        wasPerched[i] = a.perchT > 0;
+        expect(Math.hypot(a.v.x, a.v.y, a.v.z)).toBeLessThanOrEqual(0.55 + 1e-6); // langsam
+      });
+    }
+    expect(landings).toBeGreaterThan(6);
   });
 });

@@ -15,6 +15,13 @@ export interface VoiceState {
 }
 
 /**
+ * Prioritätsgewicht je Klangart (wird mit dem Abstand multipliziert – kleiner = wichtiger):
+ * nahe Insekten/Brummer zuerst, dann Blasen-Gluckern, dann Pflanzen/Tropfen, dann ferne Rufe.
+ * Spiel-Sounds laufen über einen eigenen Bus und belegen keine Pool-Stimme (haben immer Vorrang).
+ */
+export const PRIORITY_WEIGHT: Record<string, number> = { flyby: 1, ground: 1, glug: 1.6, plant: 2, drip: 2, call: 3 };
+
+/**
  * Welche Stimme bekommt ein neuer Klang? Freie Stimme, solange weniger als `maxActive` laufen;
  * sonst wird die am weitesten entfernte laufende Stimme übernommen – aber nur, wenn der neue Klang
  * näher ist (nahe Klänge haben Vorrang). −1 = verwerfen.

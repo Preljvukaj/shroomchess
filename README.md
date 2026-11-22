@@ -3,7 +3,7 @@
 Riesenschach im Browser – auf dem Desktop und (ab Meilenstein 2) in WebXR. Die Figuren sind
 hüfthoch und stehen auf einer Lichtung in einem biolumineszenten Weltraum-Dschungel.
 
-**Stand: Meilenstein 1 + Änderungsrunde 2** (Landingpage, Lichess-Partien, Senke, neue Pilze, lesbare Koordinaten, Insekten) – siehe [Fortschritt](#fortschritt) und [CHANGELOG.md](CHANGELOG.md).
+**Stand: Meilenstein 2 + Änderungsrunde 5** (Landingpage, Lichess-Partien, Senke, neue Pilze, lesbare Koordinaten, Insekten) – siehe [Fortschritt](#fortschritt) und [CHANGELOG.md](CHANGELOG.md).
 
 ## Schnellstart
 
@@ -107,8 +107,18 @@ Handtracking. Ohne `bounds` startet die manuelle Flächeneinrichtung. Steuerung 
 Sprache · Qualität · Farbenblind-Palette · Figuren ohne legalen Zug markieren · Untertitel · Lautstärke (gesamt) ·
 **Spiel-Sounds** · **Umgebung** · **Tiere / Insekten** (je eigene Lautstärke) · **Greifstrahl** (VR, aus) · **Insekten anzeigen** (aus = auch keine Insektengeräusche) ·
 **Glühwürmchen landen auf der Hand** (VR) · **Koordinatengröße S/M/L** · **Koordinaten hoher Kontrast** ·
-**Koordinaten auf den Feldern** · **Figurenkontrast** Aus/Normal/Hoch (helle Kontur der schwarzen Figuren) ·
-**Dunkle Kontur für Weiß** (optional)
+**Koordinaten auf den Feldern**
+
+Die Einstellungen „Figurenkontrast“ und „Dunkle Kontur für Weiß“ gibt es seit 0.6.0 nicht mehr. Die schwarzen Figuren heben sich jetzt
+durch das Licht ab: Lichtinsel über dem Brett, farbiges Randlicht, Umgebungsreflexionen, weiche Kontaktschatten.
+
+### Brettbeschriftung
+
+Das Brett hat einen Steinrahmen (45 % einer Feldbreite). In ihn sind die Koordinaten eingelassen: flach liegend, kursiv (Cormorant
+Garamond Italic, SDF-Text), warm golden-weiß leuchtend mit sehr langsamem Puls. Jede Seite ist für den Spieler auf ihrer Seite lesbar,
+die Zahlen an den Seiten zeigen zur näheren Grundreihe. Gegen die Engine und auf Lichess richtet sich die ganze Beschriftung nach der
+eigenen Farbe. Beim Tragen einer Figur leuchten Linie und Reihe im Rahmen auf. Die Größe S/M/L bezieht sich auf die Rahmenbreite
+(Zeichenhöhe 48/56/62 %). Die Brettgröße wird inklusive Rahmen berechnet.
 
 ### Senke anpassen
 

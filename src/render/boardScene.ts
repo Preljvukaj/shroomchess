@@ -55,7 +55,7 @@ export class BoardScene {
     this.promotion = new PromotionPicker(this.kingHeight, opts.segments, opts.high);
     this.piecesRoot.position.y = this.board.surfaceY;
     this.coords = new Coordinates(opts.squareSize, this.board.surfaceY);
-    this.pieceBatch = new PieceBatch(opts.segments, opts.high);
+    this.pieceBatch = new PieceBatch(opts.segments, opts.high, this.kingHeight, this.board.surfaceY);
     this.root.add(this.board.root, this.highlights.mesh, this.coords.root, this.piecesRoot, this.promotion.root, this.grips.root, this.pieceBatch.root);
 
     // Schalen: rechts neben dem jeweiligen Spieler (Weiß steht bei +Z und schaut nach −Z → rechts = +X)

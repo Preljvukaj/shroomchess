@@ -5,6 +5,8 @@ import { type Basin, type FlatRegion, createBasin, squarePolygon } from './basin
 import { createGroundFog, createParticles } from './particles';
 import { createSky } from './sky';
 import { createClearing } from './clearing';
+import { LavaBubbles } from './lavaBubbles';
+import { mulberry32 } from '../shared';
 import { createTerrain } from './terrain';
 import { terrain } from './terrainConfig';
 import { type GroundedObject, createVegetation } from './vegetation';
@@ -20,10 +22,14 @@ export interface World {
   grounded: GroundedObject[];
   /** Klangquellen der Pflanzen/Pilze */
   soundSpots: ReturnType<typeof createVegetation>['soundSpots'];
+  /** Steinoberseiten (Landepunkte der Brummer) */
+  rockTops: THREE.Vector3[];
+  /** Lavalampen-Blasen */
+  lava: LavaBubbles;
   /** Spielende: Dschungel leuchtet in der Siegerfarbe (null = Remis → Violett/Weiß). */
   celebrate(color: THREE.Color | null): void;
   resetTint(): void;
-  update(dt: number): void;
+  update(dt: number, camera?: THREE.Vector3, heads?: THREE.Vector3[]): void;
   tintState(): number;
   restoreTint(target: number): void;
 }
@@ -45,6 +51,8 @@ export function createWorld(profile: QualityProfile, region: FlatRegion): World 
   const rim = basin.extent + basin.rimDistance(0);
   root.add(createParticles(profile, rim));
   root.add(createGroundFog(basin.extent, rim + 1));
+  const lava = new LavaBubbles(basin, profile.bubbles, mulberry32(4242));
+  root.add(lava.mesh);
 
   let target = 0;
   return {
@@ -54,6 +62,8 @@ export function createWorld(profile: QualityProfile, region: FlatRegion): World 
     chirpSpots: veg.chirpSpots,
     grounded: veg.grounded,
     soundSpots: veg.soundSpots,
+    rockTops: veg.rockTops,
+    lava,
     celebrate(color) {
       worldUniforms.uTint.value.copy(color ?? new THREE.Color('#d7b8ff'));
       target = 0.85;
@@ -67,7 +77,8 @@ export function createWorld(profile: QualityProfile, region: FlatRegion): World 
     restoreTint(t) {
       target = t;
     },
-    update(dt) {
+    update(dt, camera, heads) {
+      if (camera) lava.update(dt, camera, heads ?? [camera]);
       const u = worldUniforms.uTintAmt;
       u.value += (target - u.value) * Math.min(1, dt * 1.2);
     },

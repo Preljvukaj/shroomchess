@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BED_SAMPLE_RATE, INSECT_RECIPES, RECIPES, chorusIntensity, generateBedLoop, nextFlybyInterval, nextInterval, recipesFor } from '../src/audio/insectSounds';
+import { BED_SAMPLE_RATE, INSECT_RECIPES, RECIPES, pickRecipe, recipeWeight, chorusIntensity, generateBedLoop, nextFlybyInterval, nextInterval, recipesFor } from '../src/audio/insectSounds';
 import { chooseVoice, dopplerCents, flybyPath, pathMinDistance } from '../src/audio/mix';
 
 describe('Insektenklänge', () => {
@@ -94,5 +94,26 @@ describe('Geräuschkulisse: Vorbeiflüge und Mix', () => {
     voices.forEach((v, i) => ((v.busyUntil = 20), (v.dist = [3, 9, 5, 1][i])));
     expect(chooseVoice(voices, 10, 2, 4)).toBe(1); // fernste (9 m) wird verdrängt
     expect(chooseVoice(voices, 10, 12, 4)).toBe(-1); // neuer Klang ist ferner → verworfen
+  });
+});
+
+describe('Blasen-Gluckern und weniger Rauschen', () => {
+  it('mindestens 8 Gluckervarianten', () => {
+    expect(recipesFor('glug').length).toBeGreaterThanOrEqual(8);
+  });
+  it('Mückensirren wird seltener gewählt', () => {
+    const list = recipesFor('flyby');
+    const m = list.find((r) => r.id === 'muecke')!;
+    expect(recipeWeight(m)).toBeLessThan(0.5);
+    let hits = 0;
+    for (let i = 0; i < 2000; i++) if (pickRecipe(list, i / 2000).id === 'muecke') hits++;
+    expect(hits / 2000).toBeLessThan(1 / list.length);
+  });
+  it('Summen-Teppich hat nur noch wenig Rauschanteil', () => {
+    const l = generateBedLoop('hum', 23, 2);
+    let rms = 0;
+    for (let i = 0; i < l.left.length; i++) rms += l.left[i] ** 2;
+    rms = Math.sqrt(rms / l.left.length);
+    expect(rms).toBeLessThan(0.01);
   });
 });

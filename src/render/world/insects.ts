@@ -15,6 +15,9 @@ import { type Agent, type InsectEnv, type InsectKind, MIN_HEAD_DIST, createAgent
 
 export interface Insects {
   root: THREE.Group;
+  /** Automatische Reduktion bei zu wenig FPS: Anteil aktiver Insekten (0,2–1). */
+  setActiveFraction(f: number): void;
+  readonly activeFraction: number;
   dispose(): void;
   setEnabled(on: boolean, landing: boolean): void;
   /** `hands`: Positionen ruhig gehaltener Hände (VR) für das Lande-Easter-Egg. */
@@ -101,6 +104,58 @@ function mothGeometry(): THREE.BufferGeometry {
   return safeMerge(parts);
 }
 
+/** Brummer: dicker, rundlicher Körper (pelzig wirkend über den Shader), kurze Flügel. Einheit ≈ 2 cm Körper. */
+function bumbleGeometry(): THREE.BufferGeometry {
+  const body = new THREE.IcosahedronGeometry(0.011, 2).scale(1, 0.88, 1.3);
+  body.deleteAttribute('uv');
+  body.setAttribute('aWing', new THREE.Float32BufferAttribute(new Float32Array(body.getAttribute('position').count), 1));
+  const parts: THREE.BufferGeometry[] = [body];
+  for (const side of [-1, 1]) {
+    const w = new THREE.PlaneGeometry(0.016, 0.009).rotateX(-Math.PI / 2).translate(side * 0.009, 0.008, -0.002);
+    w.deleteAttribute('uv');
+    w.setAttribute('aWing', new THREE.Float32BufferAttribute(new Float32Array(w.getAttribute('position').count).fill(side), 1));
+    parts.push(w);
+  }
+  return safeMerge(parts);
+}
+
+/** Brummer-Shader: schneller Flügelschlag; samtiger Körper (weicher Fresnel-Saum), Streifen orange/violett oder Petrol, dezent leuchtend. */
+const BUMBLE_SHADER = {
+  vertexShader: /* glsl */ `
+    attribute float aWing; attribute float aPhase; attribute float aVariant;
+    uniform float uTime;
+    varying float vWing; varying vec3 vLocal; varying vec3 vN; varying vec3 vView; varying float vVariant;
+    void main(){
+      vec3 p = position;
+      if (abs(aWing) > 0.5) {
+        float a = sin(uTime * 85.0 + aPhase * 6.283) * 0.7;
+        float r = abs(p.x);
+        p.y += sin(a) * r;
+        p.x = sign(aWing) * cos(a) * r;
+      }
+      vWing = aWing; vLocal = position; vVariant = aVariant;
+      vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.0);
+      vN = normalize(mat3(modelMatrix * instanceMatrix) * normal);
+      vView = normalize(cameraPosition - w.xyz);
+      gl_Position = projectionMatrix * viewMatrix * w;
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform float uTime; uniform vec3 uTint; uniform float uTintAmt;
+    varying float vWing; varying vec3 vLocal; varying vec3 vN; varying vec3 vView; varying float vVariant;
+    void main(){
+      if (abs(vWing) > 0.5) { gl_FragColor = vec4(0.75, 0.8, 1.0, 0.3); return; }
+      float stripe = step(0.5, fract(vLocal.z * 160.0));
+      vec3 c = vVariant < 0.5 ? mix(vec3(1.0, 0.5, 0.12), vec3(0.45, 0.2, 0.75), stripe) : mix(vec3(0.05, 0.42, 0.45), vec3(0.08, 0.3, 0.36), stripe);
+      c = mix(c, uTint, uTintAmt * 0.5);
+      float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vView))), 1.5);
+      // samtig: heller, weicher Saum statt harter Kante
+      vec3 col = c * (0.45 + 0.35 * (1.0 - fres)) + c * fres * 0.9 + c * 0.25;
+      gl_FragColor = vec4(col, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+};
+
 /** Leuchtpunkte (Glühwürmchen und Mücken) als kamera-ausgerichtete Quads. */
 function createGlowPoints(count: number): { mesh: THREE.Mesh; pos: Float32Array; attr: THREE.InstancedBufferAttribute; size: Float32Array; color: Float32Array } {
   const geo = new THREE.InstancedBufferGeometry();
@@ -158,11 +213,13 @@ export function createInsects(
   const rng = mulberry32(99);
   const b = world.basin;
   const total = profile.insects;
+  // dichter als zuvor: mehr Mückenschwärme über dem Nebel, mehr Motten an den Pilzen, neue Brummer
   const counts: Record<InsectKind, number> = {
-    firefly: Math.round(total * 0.35),
-    midge: Math.round(total * 0.35),
-    moth: Math.round(total * 0.18),
-    dragonfly: Math.max(2, Math.round(total * 0.12)),
+    firefly: Math.round(total * 0.24),
+    midge: Math.round(total * 0.38),
+    moth: Math.round(total * 0.2),
+    dragonfly: Math.max(2, Math.round(total * 0.08)),
+    bumble: Math.max(3, Math.round(total * 0.1)),
   };
   const rimR = b.extent + b.rimDistance(0);
   const env: InsectEnv = {
@@ -186,11 +243,19 @@ export function createInsects(
     pieceTop: board.pieceTop,
     board: board.pose,
     attractors: world.attractors.map((a) => ({ x: a.x, y: a.y, z: a.z })),
-    swarmCenters: Array.from({ length: Math.max(1, Math.round(counts.midge / 14)) }, () => ({ x: 0, y: 0, z: 0 })),
+    swarmCenters: Array.from({ length: Math.max(1, Math.round(counts.midge / 12)) }, () => ({ x: 0, y: 0, z: 0 })),
+    perches: [...world.attractors, ...world.rockTops].map((a) => ({ x: a.x, y: a.y, z: a.z })),
     landing: null,
   };
   env.swarmCenters.forEach((c) => Object.assign(c, env.wallPoint(rng, 0.6, 1.0)));
   const agents: Agent[] = createAgents(counts, env, rng);
+  // gemischt anordnen: Bei automatischer Reduktion (nur die ersten n aktiv) schrumpfen alle Arten anteilig
+  for (let i = agents.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [agents[i], agents[j]] = [agents[j], agents[i]];
+  }
+  const agentIndex = new Map(agents.map((a, i) => [a, i]));
+  let activeCount = agents.length;
 
   // --- Darstellung ---
   const glowAgents = agents.filter((a) => a.kind === 'firefly' || a.kind === 'midge');
@@ -203,7 +268,7 @@ export function createInsects(
   });
   root.add(glow.mesh);
 
-  const mkMesh = (kind: InsectKind, geo: THREE.BufferGeometry, shader: ReturnType<typeof FLAP_SHADER>) => {
+  const mkMesh = (kind: InsectKind, geo: THREE.BufferGeometry, shader: { vertexShader: string; fragmentShader: string }) => {
     const list = agents.filter((a) => a.kind === kind);
     const ph = new Float32Array(list.length).map(() => rng());
     geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(ph, 1));
@@ -216,6 +281,17 @@ export function createInsects(
   };
   const dragon = mkMesh('dragonfly', dragonflyGeometry(), FLAP_SHADER('0.2, 0.9, 1.0', '0.3, 1.0, 0.9', 55, 0.6));
   const moths = mkMesh('moth', mothGeometry(), FLAP_SHADER('1.0, 0.55, 0.9', '0.9, 0.7, 1.0', 22, 0.9));
+  const bumbles = mkMesh('bumble', bumbleGeometry(), BUMBLE_SHADER);
+  // Größe 2–5 cm und Farbvariante je Brummer
+  const bumbleSize = bumbles.list.map(() => 0.85 + rng() * 1.3);
+  const bVariant = new Float32Array(bumbles.list.length).map(() => (rng() < 0.6 ? 0 : 1));
+  bumbles.mesh.geometry.setAttribute('aVariant', new THREE.InstancedBufferAttribute(bVariant, 1));
+  /** aktive Anzahl einer Liste (Präfix, da die Agenten gemischt angeordnet sind) */
+  const activeIn = (list: Agent[]) => {
+    let n = 0;
+    while (n < list.length && (agentIndex.get(list[n]) ?? 0) < activeCount) n++;
+    return n;
+  };
 
   // --- Ton: Vorbeiflug alle 5–20 s, Zirpen aus den Wällen alle 8–20 s ---
   let enabled = true;
@@ -232,16 +308,20 @@ export function createInsects(
   const v3 = new THREE.Vector3();
   const upV = new THREE.Vector3(0, 1, 0);
   const zero = new THREE.Vector3();
-  const writeMatrices = (set: { list: Agent[]; mesh: THREE.InstancedMesh }) => {
-    set.list.forEach((a, i) => {
+  const sc = new THREE.Vector3();
+  const writeMatrices = (set: { list: Agent[]; mesh: THREE.InstancedMesh }, sizes?: number[]) => {
+    const n = activeIn(set.list);
+    for (let i = 0; i < n; i++) {
+      const a = set.list[i];
       p3.set(a.p.x, a.p.y, a.p.z);
       v3.set(a.v.x, a.v.y * 0.3, a.v.z);
       if (v3.lengthSq() < 1e-6) v3.set(0, 0, 1);
       look.lookAt(zero, v3.normalize(), upV); // lokale −Z-Achse (Kopf) zeigt in Flugrichtung
       q.setFromRotationMatrix(look);
-      m.compose(p3, q, one);
+      m.compose(p3, q, sizes ? sc.setScalar(sizes[i]) : one);
       set.mesh.setMatrixAt(i, m);
-    });
+    }
+    set.mesh.count = n;
     set.mesh.instanceMatrix.needsUpdate = true;
   };
 
@@ -259,10 +339,17 @@ export function createInsects(
         (m.material as THREE.Material | undefined)?.dispose?.();
       });
     },
+    setActiveFraction(f) {
+      activeCount = Math.max(1, Math.round(agents.length * Math.min(1, Math.max(0.2, f))));
+    },
+    get activeFraction() {
+      return activeCount / agents.length;
+    },
     setEnabled(on, landing) {
       enabled = on;
       landingOn = landing;
       root.visible = on;
+      if (!on) audio.setBrummers([]);
     },
     update(dt, time, head, fwd, hands) {
       if (!enabled) return;
@@ -278,12 +365,24 @@ export function createInsects(
         lastHand.copy(h);
         if (stillFor > 2 && h.distanceTo(head) > MIN_HEAD_DIST + 0.05) env.landing = { x: h.x, y: h.y + 0.02, z: h.z };
       }
-      stepAgents(agents, env, Math.min(dt, 0.05), rng, time);
+      stepAgents(activeCount < agents.length ? agents.slice(0, activeCount) : agents, env, Math.min(dt, 0.05), rng, time);
 
-      glowAgents.forEach((a, i) => glow.pos.set([a.p.x, a.p.y, a.p.z], i * 3));
+      const ng = activeIn(glowAgents);
+      for (let i = 0; i < ng; i++) glow.pos.set([glowAgents[i].p.x, glowAgents[i].p.y, glowAgents[i].p.z], i * 3);
+      (glow.mesh.geometry as THREE.InstancedBufferGeometry).instanceCount = ng;
       glow.attr.needsUpdate = true;
       writeMatrices(dragon);
       writeMatrices(moths);
+      writeMatrices(bumbles, bumbleSize);
+      // Brummgeräusch: die bis zu 3 nächsten Brummer in Hörweite bekommen eine eigene Stimme
+      const nb = activeIn(bumbles.list);
+      const near = bumbles.list.slice(0, nb)
+        .map((a) => ({ a, d: Math.hypot(a.p.x - head.x, a.p.y - head.y, a.p.z - head.z) }))
+        .filter((x) => x.d < 5)
+        .sort((x, y) => x.d - y.d)
+        .slice(0, 3)
+        .map((x) => x.a.p);
+      audio.setBrummers(near);
 
       nextFlyby -= dt;
       if (nextFlyby <= 0) {
