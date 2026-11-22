@@ -42,12 +42,16 @@ export interface QualityProfile {
   rockNearDetail: boolean;
   /** Gleichzeitige Lavalampen-Blasen */
   bubbles: number;
+  /** Dichte des Dschungelwalls im Fernbereich (1 = Standard) */
+  wallDensity: number;
+  /** Zusätzliche Riesenblätter/Korallen/Fächer im Mittelbereich */
+  midFlora: number;
 }
 
 export const QUALITY: Record<Quality, QualityProfile> = {
-  low: { pixelRatio: 1, bloom: false, latheSegments: 18, shroomDetail: 'low', nearShrooms: 60, rimGiants: 12, farShrooms: 40, vfarShrooms: 120, saumPerMeter: 3, babies: 40, ferns: 90, pods: 40, spores: 300, vines: 10, mycelium: 20, terrainAngular: 72, insects: 60, flora: { bubble: 14, tentacle: 12, fan: 12, coral: 18, leaf: 12, capsule: 12, clumpA: 40, clumpB: 24 }, hangingCaps: 5, rocks: 50, rockNearDetail: false, bubbles: 8 },
-  medium: { pixelRatio: 1.5, bloom: false, latheSegments: 26, shroomDetail: 'medium', nearShrooms: 100, rimGiants: 20, farShrooms: 40, vfarShrooms: 110, saumPerMeter: 5, babies: 90, ferns: 170, pods: 90, spores: 800, vines: 20, mycelium: 45, terrainAngular: 96, insects: 180, flora: { bubble: 26, tentacle: 22, fan: 22, coral: 28, leaf: 18, capsule: 22, clumpA: 80, clumpB: 44 }, hangingCaps: 10, rocks: 90, rockNearDetail: false, bubbles: 14 },
-  high: { pixelRatio: 2, bloom: true, latheSegments: 36, shroomDetail: 'high', nearShrooms: 280, rimGiants: 36, farShrooms: 120, vfarShrooms: 420, saumPerMeter: 8, babies: 220, ferns: 480, pods: 200, spores: 2000, vines: 36, mycelium: 90, terrainAngular: 128, insects: 400, flora: { bubble: 70, tentacle: 60, fan: 60, coral: 100, leaf: 60, capsule: 60, clumpA: 200, clumpB: 110 }, hangingCaps: 20, rocks: 160, rockNearDetail: true, bubbles: 20 },
+  low: { pixelRatio: 1, bloom: false, latheSegments: 18, shroomDetail: 'low', nearShrooms: 60, rimGiants: 12, farShrooms: 100, vfarShrooms: 0, saumPerMeter: 3, babies: 40, ferns: 90, pods: 40, spores: 300, vines: 10, mycelium: 20, terrainAngular: 72, insects: 60, flora: { bubble: 14, tentacle: 12, fan: 12, coral: 18, leaf: 12, capsule: 12, clumpA: 40, clumpB: 24 }, hangingCaps: 5, rocks: 70, rockNearDetail: false, bubbles: 8, wallDensity: 0.8, midFlora: 40 },
+  medium: { pixelRatio: 1.5, bloom: false, latheSegments: 26, shroomDetail: 'medium', nearShrooms: 100, rimGiants: 20, farShrooms: 80, vfarShrooms: 0, saumPerMeter: 5, babies: 90, ferns: 170, pods: 90, spores: 800, vines: 20, mycelium: 45, terrainAngular: 96, insects: 180, flora: { bubble: 26, tentacle: 22, fan: 22, coral: 28, leaf: 18, capsule: 22, clumpA: 80, clumpB: 44 }, hangingCaps: 10, rocks: 120, rockNearDetail: false, bubbles: 12, wallDensity: 1, midFlora: 25 },
+  high: { pixelRatio: 2, bloom: true, latheSegments: 36, shroomDetail: 'high', nearShrooms: 280, rimGiants: 36, farShrooms: 300, vfarShrooms: 0, saumPerMeter: 8, babies: 220, ferns: 480, pods: 200, spores: 2000, vines: 36, mycelium: 90, terrainAngular: 128, insects: 400, flora: { bubble: 70, tentacle: 60, fan: 60, coral: 100, leaf: 60, capsule: 60, clumpA: 200, clumpB: 110 }, hangingCaps: 20, rocks: 200, rockNearDetail: true, bubbles: 20, wallDensity: 1.3, midFlora: 200 },
 };
 
 export type FrameCallback = (dt: number, time: number, frame?: XRFrame) => void;

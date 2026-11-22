@@ -10,6 +10,8 @@ import type { V2 } from './math/vec2';
 import { V } from './strings';
 import { Button3D, ButtonGroup, Panel3D } from './ui3d';
 import { type XRPointer, XRInput } from './xrInput';
+import { ColocController, type ColocHost } from './colocation';
+import type { PeerMsg } from '../net/protocol';
 
 /**
  * VR-Einzelspieler (Meilenstein 2): Sitzung, Spielfläche, Brett-Platzierung, 3D-Oberfläche,
@@ -35,11 +37,14 @@ export interface VRHost {
   applyPlacement(p: BoardPlacement, region: V2[]): void;
   /** Rückkehr zum Desktop-Layout */
   onExit(): void;
-  clockText(): string;
   isGameOver(): boolean;
   action(id: string): void;
   /** Für Untertitel/Hinweise in VR */
   setSubtitleSink(fn: ((text: string) => void) | null): void;
+  /** Netzwerkspiel: Menüpunkte für Nachrichten/Sprachchat */
+  net?: boolean;
+  /** Co-Location (zwei Brillen im selben Raum) */
+  coloc?: ColocHost;
 }
 
 type Phase = 'idle' | 'setup' | 'playing';
@@ -53,7 +58,6 @@ export class VRMode {
   private manualSide: number | undefined;
   private warning: BoundaryWarning | null = null;
   private showBoundary = 0;
-  private clock = new Panel3D({ fontSize: 0.07, maxWidth: 1.6 });
   private notice = new Panel3D({ fontSize: 0.032, maxWidth: 0.9 });
   private noticeUntil = 0;
   private menu = new THREE.Group();
@@ -72,13 +76,23 @@ export class VRMode {
   private lastPressed = new Map<string, boolean>();
   private time = 0;
   private noticeTarget = new THREE.Vector3();
+  private coloc: ColocController | null = null;
+  private confirmPanel = new Panel3D({ fontSize: 0.03, maxWidth: 0.9 });
+  private confirmButtons = new ButtonGroup();
+  private confirmResolve: ((ok: boolean) => void) | null = null;
+  private trackingLostFor = 0;
 
   constructor(private host: VRHost) {
     const ui = new THREE.Group();
     ui.name = 'vr-ui';
-    ui.add(this.clock.root, this.notice.root, this.menu, this.setupPanel.root, this.cornerMarkers);
+    ui.add(this.notice.root, this.menu, this.setupPanel.root, this.cornerMarkers, this.confirmPanel.root);
     this.menu.visible = false;
     this.buildMenu();
+    const yes = this.confirmButtons.add(new Button3D('yes', V('yes'), 0.035, '#9dff3a'));
+    const no = this.confirmButtons.add(new Button3D('no', V('no'), 0.035, '#ff4fd8'));
+    yes.root.position.set(-0.25, -0.16, 0);
+    no.root.position.set(0.08, -0.16, 0);
+    this.confirmPanel.root.add(yes.root, no.root);
     this.buildSetup();
     this.uiRoot = ui;
   }
@@ -133,10 +147,33 @@ export class VRMode {
     ref?.addEventListener('reset', () => void this.onReset(type));
     this.host.setSubtitleSink((txt) => this.say(txt, 3));
 
-    if (bounds.length >= 3) {
+    this.rebuildMenu();
+    if (this.host.coloc) {
+      this.coloc?.dispose();
+      const vr = this;
+      this.coloc = new ColocController(this.host.coloc, {
+        head: () => vr.head(),
+        headYaw: () => vr.headYaw(),
+        say: (t, s) => vr.say(t, s),
+        ui: this.uiRoot,
+        region: () => vr.region,
+        place: (region, b) => vr.placeColoc(region, b),
+        stick: (h) => vr.input?.stick(h) ?? [0, 0],
+        buttonDown: (h, i) => vr.input?.buttonDown(h, i) ?? false,
+        haptic: (k, ms) => vr.input?.pointers.forEach((p) => p.haptic?.(k, ms)),
+        handTips: () => (vr.input?.pointers ?? []).map((p) => p.tip.clone()),
+      });
+      for (const m of this.colocInbox) this.coloc.onMessage(m);
+      this.colocInbox = [];
+    }
+    if (this.host.coloc?.role === 'guest') {
+      // Gast: Spielfläche kommt vom Host (über die Kalibrierung)
+      this.phase = 'playing';
+    } else if (bounds.length >= 3) {
       this.region = orderPolygon(bounds);
       this.phase = 'playing';
-      this.needsPlacement = true; // nach dem ersten Frame (Kopfpose bekannt)
+      if (this.coloc) this.coloc.boundaryReady();
+      else this.needsPlacement = true; // nach dem ersten Frame (Kopfpose bekannt)
     } else {
       this.startSetup();
     }
@@ -158,6 +195,21 @@ export class VRMode {
 
   private async onReset(type: XRReferenceSpaceType): Promise<void> {
     if (!this.session) return;
+    if (this.coloc) {
+      // Neu zentriert → beide Koordinatensysteme passen nicht mehr zusammen
+      if (this.host.coloc?.role === 'host' && type === 'bounded-floor') {
+        try {
+          const bsp = (await this.session.requestReferenceSpace('bounded-floor')) as XRBoundedReferenceSpace;
+          const b = Array.from(bsp.boundsGeometry ?? []).map((p) => ({ x: p.x, z: p.z }));
+          if (b.length >= 3) this.region = orderPolygon(b);
+        } catch {
+          /* alte Fläche */
+        }
+        this.coloc.boundaryReady();
+      }
+      this.coloc.recalibrate('colocReset');
+      return;
+    }
     if (type === 'bounded-floor') {
       try {
         const bsp = (await this.session.requestReferenceSpace('bounded-floor')) as XRBoundedReferenceSpace;
@@ -176,8 +228,27 @@ export class VRMode {
 
   // ---------- Platzierung ----------
 
+  /**
+   * Kopfmitte (Welt). Achtung: Die XR-Kamera von three.js liegt auf dem LINKEN Auge – für die Kalibrierung zählt die
+   * Mitte zwischen beiden Augen (sonst addieren sich Rücken an Rücken 2 × 3 cm Fehler).
+   */
   private head(): THREE.Vector3 {
+    const xr = this.host.renderer.xr;
+    if (xr.isPresenting) {
+      const cams = xr.getCamera().cameras;
+      if (cams.length >= 2) {
+        const a = new THREE.Vector3().setFromMatrixPosition(cams[0].matrixWorld);
+        const b = new THREE.Vector3().setFromMatrixPosition(cams[1].matrixWorld);
+        return a.add(b).multiplyScalar(0.5);
+      }
+    }
     return this.host.camera.getWorldPosition(new THREE.Vector3());
+  }
+
+  /** Kopfpose (Welt) mit der Kopfmitte als Position – für die Posen-Übertragung. */
+  headMatrix(): THREE.Matrix4 {
+    const q = this.host.camera.getWorldQuaternion(new THREE.Quaternion());
+    return new THREE.Matrix4().compose(this.head(), q, new THREE.Vector3(1, 1, 1));
   }
 
   private headYaw(): number {
@@ -196,20 +267,13 @@ export class VRMode {
     this.warning?.dispose();
     this.warning = new BoundaryWarning(this.region);
     this.host.scene.add(this.warning.mesh);
-    const k = p.squareSize / this.host.localSquare;
     if (p.mode === 'roomscale') this.say(V('placedRoom', { cm: Math.round(p.squareSize * 100), kcm: Math.round(p.squareSize * 220) }), 7);
     else this.say(V(p.reason === 'seated' ? 'placedSeated' : 'placedSmall'), 7);
-    this.clock.root.visible = true;
-    this.clock.text.fontSize = p.mode === 'roomscale' ? 0.07 : 0.022;
-    this.clock.pad = this.clock.text.fontSize * 0.7;
-    this.clockScale = k;
     setTimeout(() => {
       // nur, wenn gerade nichts Wichtigeres angezeigt wird
       if (!this.notice.root.visible) this.say(this.input?.hasController('left') ? V('menuHintController') : V('menuHintHand'), 5);
     }, 7500);
   }
-
-  private clockScale = 1;
 
   // ---------- Manuelle Flächeneinrichtung (local-floor) ----------
 
@@ -273,7 +337,60 @@ export class VRMode {
     this.setupPanel.root.visible = false;
     setTimeout(() => this.cornerMarkers.clear(), 1500);
     this.phase = 'playing';
-    this.needsPlacement = true;
+    if (this.coloc) this.coloc.boundaryReady();
+    else this.needsPlacement = true;
+  }
+
+  /** Co-Location: Brett aus der Kalibrierung setzen (Region = Host-Boundary in eigenen Koordinaten). */
+  private placeColoc(region: V2[], b: { center: V2; yaw: number; squareSize: number; totalSide: number }): void {
+    this.region = region;
+    const p: BoardPlacement = { center: b.center, yaw: b.yaw, height: 0, squareSize: b.squareSize, mode: 'roomscale', maxSide: b.totalSide, totalSide: b.totalSide, reason: 'fits' };
+    this.placement = p;
+    this.host.applyPlacement(p, region);
+    this.warning?.dispose();
+    this.warning = new BoundaryWarning(region);
+    this.host.scene.add(this.warning.mesh);
+  }
+
+  /** vor dem VR-Eintritt empfangene Co-Location-Nachrichten (z. B. die Host-Boundary) */
+  private colocInbox: PeerMsg[] = [];
+
+  /** Co-Location-Nachricht vom Mitspieler */
+  onColocMessage(m: PeerMsg): void {
+    if (this.coloc) this.coloc.onMessage(m);
+    else if (m.t === 'coloc-boundary') this.colocInbox = [m];
+  }
+
+  /** Mitspieler verbunden (Co-Location: Boundary erneut schicken) */
+  colocPeerReady(): void {
+    this.coloc?.peerReady();
+  }
+
+  /** Bestätigungsdialog in VR (Ja/Nein-Pilzhüte) */
+  confirm(question: string): Promise<boolean> {
+    this.confirmResolve?.(false);
+    this.confirmPanel.setText(question);
+    this.confirmPanel.root.visible = true;
+    const h = this.head();
+    const f = this.host.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+    this.confirmPanel.root.position.copy(h).addScaledVector(f, 0.75).setY(h.y - 0.2);
+    this.confirmPanel.faceYaw(h);
+    return new Promise((res) => (this.confirmResolve = res));
+  }
+
+  /** Hände (Fingerspitze bzw. Controllerspitze) je Seite, null = nicht verfolgt */
+  handPoses(): { left: THREE.Vector3 | null; right: THREE.Vector3 | null } {
+    const ps = this.input?.pointers ?? [];
+    const of = (h: 'left' | 'right') => ps.find((p) => p.handedness === h)?.tip.clone() ?? null;
+    return { left: of('left'), right: of('right') };
+  }
+
+  get colocCalibrated(): boolean {
+    return !this.coloc || this.coloc.calibrated;
+  }
+
+  startHighFive(): void {
+    this.coloc?.startHighFive();
   }
 
   // ---------- Hinweise / Uhr ----------
@@ -302,19 +419,6 @@ export class VRMode {
     this.notice.faceYaw(h);
   }
 
-  private updateClock(): void {
-    if (!this.placement || !this.clock.root.visible) return;
-    const p = this.placement;
-    // am rechten Brettrand (aus Sicht von Weiß), schwebend; beide Seiten sehen sie
-    const halfWorld = this.host.boardHalfLocal * this.clockScale;
-    const right = new THREE.Vector3(Math.cos(p.yaw), 0, -Math.sin(p.yaw));
-    const y = p.mode === 'roomscale' ? 1.35 : p.height + 0.22;
-    const off = p.mode === 'roomscale' ? 0.45 : 0.08;
-    this.clock.root.position.set(p.center.x, y, p.center.z).addScaledVector(right, halfWorld + off);
-    this.clock.faceYaw(this.head());
-    this.clock.setText(this.host.clockText());
-  }
-
   // ---------- Handgelenk-Menü ----------
 
   private menuItems: { id: string; key: Parameters<typeof V>[0] }[] = [
@@ -333,6 +437,24 @@ export class VRMode {
     { id: 'new', key: 'mNew' },
     { id: 'exit', key: 'mExit' },
   ];
+
+  private readonly baseItems = [...this.menuItems];
+
+  /** Menüpunkte je nach Modus (Netzwerk: Nachrichten/Sprachchat; Co-Location: Abklatsch-Check/Neu kalibrieren). */
+  private rebuildMenu(): void {
+    let items = [...this.baseItems];
+    if (this.host.net) items.splice(items.length - 2, 0, { id: 'emote-nice', key: 'mEmoteNice' }, { id: 'emote-hmm', key: 'mEmoteHmm' }, { id: 'voice', key: 'mVoice' });
+    if (this.host.coloc) {
+      // Größe/Lage kommen aus der Kalibrierung – eigene Platzierung würde die Bretter auseinanderbringen
+      items = items.filter((m) => !['realign', 'seated', 'smaller', 'bigger'].includes(m.id));
+      items.splice(3, 0, { id: 'highfive', key: 'mHighFive' }, { id: 'recal', key: 'mRecal' });
+    }
+    this.menuItems = items;
+    for (const b of this.menuButtons.buttons) b.root.removeFromParent();
+    this.menuButtons.buttons.length = 0;
+    this.menuTitle.root.removeFromParent();
+    this.buildMenu();
+  }
 
   private buildMenu(): void {
     this.menuTitle.setText(V('menuTitle'));
@@ -428,6 +550,12 @@ export class VRMode {
       case 'exit':
         this.exit();
         return;
+      case 'highfive':
+        this.coloc?.startHighFive();
+        return;
+      case 'recal':
+        this.coloc?.recalibrate(null);
+        return;
       default:
         this.host.action(id); // draw, undo, rematch, new
     }
@@ -449,10 +577,33 @@ export class VRMode {
       this.place();
     }
 
+    // Bestätigungsdialog hat Vorrang
+    if (this.confirmPanel.root.visible) {
+      const fired = this.confirmButtons.update(dt, pointers, true, consumed);
+      if (fired) {
+        this.confirmPanel.root.visible = false;
+        const r = this.confirmResolve;
+        this.confirmResolve = null;
+        r?.(fired === 'yes');
+      }
+    }
+    // Tracking-Verlust (Co-Location): Pose fehlt oder ist nur geschätzt → danach neu kalibrieren
+    if (this.coloc) {
+      const frame = this.host.renderer.xr.getFrame();
+      const ref = this.host.renderer.xr.getReferenceSpace();
+      const vp = frame && ref ? frame.getViewerPose(ref) : null;
+      if (!vp || vp.emulatedPosition) this.trackingLostFor += dt;
+      else {
+        if (this.trackingLostFor > 0.6 && this.coloc.calibrated) this.coloc.recalibrate('colocTrackingLost');
+        this.trackingLostFor = 0;
+      }
+    }
+
     if (this.phase === 'setup') {
       this.setupStep(pointers, consumed);
     } else if (this.phase === 'playing') {
       this.updateMenu(pointers, consumed, dt);
+      this.coloc?.update(dt, pointers, consumed);
       // Brett-Interaktion mit allen Zeigern, die gerade keinen Knopf berühren
       const free = pointers.filter((p) => !consumed.has(p.id));
       const all: Pointer[] = [...free];
@@ -473,8 +624,8 @@ export class VRMode {
           this.rayBeam(rid, ray);
         }
       } else for (const id of this.rayBeams.keys()) this.rayBeam(id, null);
-      this.host.interaction.update(all);
-      this.updateClock();
+      // Co-Location: vor der Kalibrierung steht das Brett noch nicht an der gemeinsamen Stelle
+      this.host.interaction.update(this.colocCalibrated ? all : []);
       // Grenzwarnung (Kopf + Hände) und kurzer Text, wenn der Kopf sehr nah ist
       if (this.warning) {
         const h = this.head();

@@ -95,7 +95,7 @@ export class CaptureBowl {
       const key = `${m.color}${m.type}`;
       let b = this.batches.get(key);
       if (!b) {
-        b = new THREE.InstancedMesh(pieceGeometry(m.type, Math.max(12, this.segments >> 1)), pieceMaterials(this.high)[m.color], 16);
+        b = new THREE.InstancedMesh(pieceGeometry(m.type, Math.max(12, this.segments >> 1), 1.25), pieceMaterials(this.high)[m.color], 16);
         b.frustumCulled = false;
         b.count = 0;
         this.batches.set(key, b);

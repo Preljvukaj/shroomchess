@@ -7,6 +7,15 @@ import { getToken, login, logout } from '../../lichess/auth';
 import { startBackground } from './background';
 import { type LKey, L } from './strings';
 import { generateRoomCode, normalizeRoomCode, roomLink } from './route';
+import qrcode from 'qrcode-generator';
+
+/** QR-Code (SVG) für den Einladungslink */
+function qrSvg(text: string): string {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+}
 
 /**
  * Landingpage: zwei gleichwertige Einstiege (Lokales Spiel / Lichess-Match),
@@ -68,7 +77,7 @@ export function startAvailability(
   if (!s.top) reason = 'pickMode';
   else if (s.top === 'local') {
     if (!s.local) reason = 'pickMode';
-    else if (s.local === 'coloc' || s.local === 'online') reason = 'netSoon';
+    else if ((s.local === 'coloc' || s.local === 'online') && !normalizeRoomCode(s.room)) reason = 'invalidRoom';
   } else {
     if (!ctx.loggedIn) reason = 'needLogin';
     else if (!s.lichess) reason = 'pickMode';
@@ -77,7 +86,9 @@ export function startAvailability(
     else if ((s.lichess === 'challenge' || s.lichess === 'ai') && !tcAllowedForLichess(s.tc)) reason = 'badTc';
   }
   const vrReason: LKey | null = !ctx.vrSupported ? 'vrNoSupport' : !VR_GAMEPLAY_AVAILABLE ? 'vrSoon' : null;
-  return { browser: reason === null, vr: reason === null && vrReason === null, reason, vrReason };
+  // Co-Location braucht zwei Brillen: im Browser nur als Gast eines Online-Raums sinnvoll
+  const colocBrowser = s.top === 'local' && s.local === 'coloc' && s.colocRole === 'host';
+  return { browser: reason === null && !colocBrowser, vr: reason === null && vrReason === null, reason: reason ?? (colocBrowser ? 'colocVR' : null), vrReason };
 }
 
 function tcOf(id: string): { initial: number; increment: number } {
@@ -150,13 +161,13 @@ export function showLanding(root: HTMLElement, opts: LandingOptions): Promise<Ga
 
       let localPanel = '';
       if (state.top === 'local') {
-        const coloc = `${card('coloc', L('coloc'), L('colocDesc'), state.local === 'coloc', L('soon', { m: '4' }))}`;
+        const coloc = `${card('coloc', L('coloc'), L('colocDesc'), state.local === 'coloc')}`;
         const opts2 = phone
           ? coloc + `<p class="note">${L('phoneNote')}</p>`
           : coloc +
             card('hotseat', L('hotseat'), L('hotseatDesc'), state.local === 'hotseat') +
             card('engine', L('engine'), L('engineDesc'), state.local === 'engine') +
-            card('online', L('online'), L('onlineDesc'), state.local === 'online', L('soon', { m: '3' }));
+            card('online', L('online'), L('onlineDesc'), state.local === 'online');
         let colocBox = '';
         if (state.local === 'coloc' || state.local === 'online') {
           const link = state.room ? roomLink(location.origin, location.pathname, state.room) : '';
@@ -167,9 +178,12 @@ export function showLanding(root: HTMLElement, opts: LandingOptions): Promise<Ga
             </div>
             ${state.colocRole === 'host'
               ? `<p>${L('roomCode')}: <b class="code">${esc(state.room || '—')}</b></p>
-                 ${link ? `<p class="linkrow"><input readonly value="${esc(link)}" aria-label="${L('roomLink')}"><button data-act="copy">${L('copy')}</button></p>` : ''}`
-              : `<label>${L('roomCode')}<input id="roomIn" value="${esc(state.room)}" maxlength="8" autocapitalize="characters" autocomplete="off"></label>`}
-            <p class="note">${L('netSoon')}</p></div>`;
+                 ${link ? `<p class="linkrow"><input readonly value="${esc(link)}" aria-label="${L('roomLink')}"><button data-act="copy">${L('copy')}</button></p>
+                 <div class="qr">${qrSvg(link)}</div>` : ''}
+                 <p class="note">${L('netHostNote')}</p>`
+              : `<label>${L('roomCode')}<input id="roomIn" value="${esc(state.room)}" maxlength="8" autocapitalize="characters" autocomplete="off"></label>
+                 <p class="note">${L('netJoinNote')}</p>`}
+            </div>`;
         }
         localPanel = `<section class="panel"><h2>${L('local')}</h2><div class="opts">${opts2}</div>${colocBox}</section>`;
       }
@@ -363,7 +377,8 @@ export function showLanding(root: HTMLElement, opts: LandingOptions): Promise<Ga
       if (state.top === 'local') {
         const mode: GameMode =
           state.local === 'coloc' ? (state.colocRole === 'host' ? 'coloc-host' : 'coloc-join') : state.local === 'online' ? 'online-link' : (state.local as GameMode);
-        finish({ ...base, mode, room: state.room || undefined });
+        const net = state.local === 'coloc' || state.local === 'online';
+        finish({ ...base, mode, room: state.room || undefined, role: net ? (state.colocRole === 'host' ? 'host' : 'guest') : undefined });
         return;
       }
       // Lichess

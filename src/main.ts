@@ -38,6 +38,17 @@ async function boot(): Promise<void> {
   let cfg: GameConfig;
   if (resume) cfg = resume.cfg;
   else if (route.view === 'autostart') cfg = { mode: route.mode, name: '', color: 'w', tc: '10+5', engineLevel: 3, vr: false };
+  else if (route.view === 'autostart-net')
+    cfg = {
+      mode: route.kind === 'online' ? 'online-link' : route.role === 'host' ? 'coloc-host' : 'coloc-join',
+      role: route.role,
+      room: route.room,
+      name: route.name,
+      color: route.color,
+      tc: route.tc,
+      engineLevel: 3,
+      vr: route.vr,
+    };
   else {
     let notice: string | undefined;
     let openLichess = false;

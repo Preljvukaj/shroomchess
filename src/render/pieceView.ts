@@ -33,6 +33,8 @@ export class PieceView {
   proximity = 0;
   /** Kurzes Aufleuchten beim Greifen (1 → 0). */
   flash = 0;
+  /** Vorwarnung vor einem gegnerischen Zug: Griffpunkt leuchtet anhaltend in der Figurenfarbe (0..1). */
+  preGlow = 0;
   readonly height: number;
 
   constructor(
@@ -109,6 +111,12 @@ export class PieceView {
         break;
       default:
         break;
+    }
+    if (this.preGlow > 0) {
+      halo = Math.max(halo, 0.75 * this.preGlow);
+      opacity = Math.max(opacity, this.preGlow);
+      scale *= 1 + 0.45 * this.preGlow;
+      col = base;
     }
     if (this.flash > 0) {
       // Snap-Feedback: Griffpunkt leuchtet kurz kräftig auf

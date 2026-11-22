@@ -33,6 +33,12 @@ export interface Settings {
   ambienceVolume: number;
   /** Lautstärke „Spiel-Sounds“ (Zug, Schach, UI). */
   sfxVolume: number;
+  /** Desktop: Infos (Uhr, Züge, Status) zusätzlich als 2D-Overlay. Aus = nur Steintafel (Overlay erscheint dann nur, wenn die Tafel nicht im Bild ist). */
+  infoOverlay: boolean;
+  /** Tempo der Animation gegnerischer Züge (KI, Lichess, Online ohne Live-Pose). */
+  opponentAnim: 'slow' | 'normal' | 'fast';
+  /** Vorschlag „Schnell“ bei Bullet/Blitz schon beantwortet */
+  fastSuggested: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -56,6 +62,9 @@ const DEFAULTS: Settings = {
   grabRay: false,
   ambienceVolume: 0.6,
   sfxVolume: 0.9,
+  infoOverlay: false,
+  opponentAnim: 'slow',
+  fastSuggested: false,
 };
 
 const KEY = 'myzel-schach.settings.v1';

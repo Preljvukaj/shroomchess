@@ -17,7 +17,13 @@ export interface OverlayHandlers {
   analysis(on: boolean): void;
   analysisStep(ply: number): void;
   qualityChanged(q: Quality | null): void;
+  /** nur im Netzwerkspiel */
+  emote?(id: string): void;
+  voice?(on: boolean): Promise<boolean>;
+  invite?(): void;
 }
+
+export const EMOTE_IDS = ['nice', 'hmm', 'wow', 'oops', 'gg', 'thinking'] as const;
 
 const GLYPH: Record<Color, Record<PieceSymbol, string>> = {
   w: { k: '♔', q: '♕', r: '♖', b: '♗', n: '♘', p: '♙' },
@@ -37,6 +43,43 @@ export class Overlay {
   private analysisMax = 0;
   private subTimer = 0;
   names: Record<Color, string> = { w: '', b: '' };
+  private infoShown = false;
+  /** Netzwerkspiel: Nachrichten/Sprachchat/Einladen im Menü */
+  net = false;
+  private voiceOn = false;
+  private inviteData: { code: string; link: string; svg: string } | null = null;
+
+  /** Einladungsdialog (Code, Link, QR-Code als SVG). */
+  showInvite(code: string, link: string, svg: string): void {
+    this.inviteData = { code, link, svg };
+    this.fillInvite();
+    this.q('.modal.invite').hidden = false;
+  }
+
+  hideInvite(): void {
+    this.q('.modal.invite').hidden = true;
+  }
+
+  private fillInvite(): void {
+    if (!this.inviteData) return;
+    this.q('.invite-code').textContent = this.inviteData.code;
+    this.q<HTMLInputElement>('.invite-link').value = this.inviteData.link;
+    this.q('.qr').innerHTML = this.inviteData.svg;
+  }
+
+  /** Menü neu aufbauen (z. B. wenn das Netzwerkspiel startet). */
+  rerender(): void {
+    this.render();
+    this.fillInvite();
+    this.onRerender?.();
+  }
+
+  /** Infos (Uhr, Züge, Status, Geschlagene) im 2D-Panel zeigen? Das Menü bleibt immer erreichbar. */
+  setInfoVisible(on: boolean): void {
+    if (on === this.infoShown) return;
+    this.infoShown = on;
+    this.q('.panel.side').classList.toggle('info-hidden', !on);
+  }
 
   constructor(parent: HTMLElement, private h: OverlayHandlers) {
     this.el = document.createElement('div');
@@ -86,6 +129,10 @@ export class Overlay {
             <button data-a="pgn">⤓ ${t('savePgn')}</button>
             <button data-a="new">✦ ${t('newGame')}</button>
           </div>
+          ${this.net ? `<h3>${t('messages')}</h3>
+          <div class="btn-row wrap emotes">${EMOTE_IDS.map((id) => `<button data-emote="${id}">${t(`emote_${id}` as I18nKey)}</button>`).join('')}</div>
+          <div class="btn-row wrap"><button data-a="invite">✉ ${t('invite')}</button>
+            <label class="voice"><input type="checkbox" data-voice ${this.voiceOn ? 'checked' : ''}> 🎙 ${t('voice')}</label></div>` : ''}
           <h3>${t('settings')}</h3>
           <div class="settings">
             <label>${t('language')} <select data-s="lang"><option value="de">Deutsch</option><option value="en">English</option></select></label>
@@ -105,6 +152,9 @@ export class Overlay {
             <label>${t('coordSize')} <select data-s="coordSize"><option value="S">S</option><option value="M">M</option><option value="L">L</option></select></label>
             <label><input type="checkbox" data-s="coordHighContrast"> ${t('coordContrast')}</label>
             <label><input type="checkbox" data-s="coordsOnSquares"> ${t('coordsOnSquares')}</label>
+            <label><input type="checkbox" data-s="infoOverlay"> ${t('infoOverlay')}</label>
+            <label>${t('backToBack')} <select data-s="backToBackOffset"><option value="0.25">25 cm</option><option value="0.3">30 cm</option><option value="0.35">35 cm</option></select></label>
+            <label>${t('opponentAnim')} <select data-s="opponentAnim"><option value="slow">${t('animSlow')}</option><option value="normal">${t('animNormal')}</option><option value="fast">${t('animFast')}</option></select></label>
           </div>
           <button class="close">${t('close')}</button>
         </div>
@@ -120,6 +170,16 @@ export class Overlay {
             <button data-a="analysis">⌕ ${t('analysis')}</button>
             <button data-a="new">✦ ${t('newGame')}</button>
           </div>
+          <button class="close">${t('close')}</button>
+        </div>
+      </div>
+      <div class="modal invite" hidden>
+        <div class="modal-card">
+          <h2>${t('invite')}</h2>
+          <p>${t('inviteText')}</p>
+          <p class="invite-code"></p>
+          <p class="linkrow"><input readonly class="invite-link"><button data-copy-link>⧉</button></p>
+          <div class="qr"></div>
           <button class="close">${t('close')}</button>
         </div>
       </div>
@@ -152,7 +212,32 @@ export class Overlay {
       rematch: () => this.h.rematch(),
       new: () => this.h.newGame(),
       analysis: () => this.h.analysis(true),
+      invite: () => this.h.invite?.(),
     };
+    this.el.querySelectorAll<HTMLButtonElement>('[data-emote]').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.q('.modal.menu').hidden = true;
+        this.h.emote?.(b.dataset.emote!);
+      }),
+    );
+    this.el.querySelector<HTMLInputElement>('[data-voice]')?.addEventListener('change', async (e) => {
+      const cb = e.target as HTMLInputElement;
+      const ok = (await this.h.voice?.(cb.checked)) ?? false;
+      if (!ok && cb.checked) {
+        cb.checked = false;
+        this.toast(t('voiceFailed'));
+      }
+      this.voiceOn = cb.checked;
+      this.toast(t(cb.checked ? 'voiceOn' : 'voiceOff'));
+    });
+    this.el.querySelector('[data-copy-link]')?.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(this.q<HTMLInputElement>('.invite-link').value);
+        this.toast(t('copied'));
+      } catch {
+        /* ignorieren */
+      }
+    });
     this.el.querySelectorAll<HTMLButtonElement>('[data-a]').forEach((b) =>
       b.addEventListener('click', () => {
         b.closest<HTMLElement>('.modal')!.hidden = true;
@@ -162,7 +247,7 @@ export class Overlay {
     // Einstellungen
     this.q<HTMLSelectElement>('[data-s=lang]').value = s.lang;
     this.q<HTMLSelectElement>('[data-s=quality]').value = qv;
-    for (const k of ['colorblind', 'markNoLegalMoves', 'subtitles', 'insects', 'insectLanding', 'coordHighContrast', 'coordsOnSquares', 'grabRay'] as const) {
+    for (const k of ['colorblind', 'markNoLegalMoves', 'subtitles', 'insects', 'insectLanding', 'coordHighContrast', 'coordsOnSquares', 'grabRay', 'infoOverlay'] as const) {
       const cb = this.q<HTMLInputElement>(`[data-s=${k}]`);
       cb.checked = s[k];
       cb.addEventListener('change', () => settings.set({ [k]: cb.checked }));
@@ -175,6 +260,13 @@ export class Overlay {
     const cs = this.q<HTMLSelectElement>('[data-s=coordSize]');
     cs.value = s.coordSize;
     cs.addEventListener('change', () => settings.set({ coordSize: cs.value as 'S' | 'M' | 'L' }));
+    const bb = this.q<HTMLSelectElement>('[data-s="backToBackOffset"]');
+    bb.value = String(s.backToBackOffset);
+    bb.addEventListener('change', () => settings.set({ backToBackOffset: Number(bb.value) }));
+    const oa = this.q<HTMLSelectElement>('[data-s="opponentAnim"]');
+    oa.value = s.opponentAnim;
+    oa.addEventListener('change', () => settings.set({ opponentAnim: oa.value as 'slow' | 'normal' | 'fast' }));
+    this.q('.panel.side').classList.toggle('info-hidden', !this.infoShown);
     const vol = this.q<HTMLInputElement>('[data-s=volume]');
     vol.value = String(s.volume);
     vol.addEventListener('input', () => settings.set({ volume: Number(vol.value) }));

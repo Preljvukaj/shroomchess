@@ -1,10 +1,20 @@
 import * as THREE from 'three';
-import { GLSL_NOISE, worldUniforms } from '../shared';
+import { GLSL_NOISE, GLSL_SKY_BASE, worldUniforms } from '../shared';
 
 /**
  * Himmel in einem einzigen Draw Call: Sternenfeld, Nebelschleier, zwei Monde
  * und ein gebänderter Gasriese mit Ring – alles analytisch im Fragment-Shader.
  */
+/** Himmelskörper (Richtung, Winkelradius in sin-Näherung) – auch für die Asteroidenbahnen (nie hindurch). */
+export const SKY_BODIES = {
+  moon1: { dir: new THREE.Vector3(-0.45, 0.55, -0.7).normalize(), r: 0.05 },
+  moon2: { dir: new THREE.Vector3(0.6, 0.32, -0.73).normalize(), r: 0.028 },
+  // Gasriese inkl. Ring (Ring bis 1,9 × Radius)
+  giant: { dir: new THREE.Vector3(0.15, 0.08, 1.0).normalize(), r: 0.32 * 1.9 },
+};
+/** feste Licht-Richtung am Himmel (Asteroiden: eine Seite hell, eine dunkel) */
+export const SKY_SUN = new THREE.Vector3(-0.8, 0.3, 0.2).normalize();
+
 export function createSky(): THREE.Mesh {
   const geo = new THREE.SphereGeometry(300, 48, 24);
   const mat = new THREE.ShaderMaterial({
@@ -13,10 +23,10 @@ export function createSky(): THREE.Mesh {
     fog: false,
     uniforms: {
       uTime: worldUniforms.uTime,
-      uMoon1: { value: new THREE.Vector3(-0.45, 0.55, -0.7).normalize() },
-      uMoon2: { value: new THREE.Vector3(0.6, 0.32, -0.73).normalize() },
-      uGiant: { value: new THREE.Vector3(0.15, 0.08, 1.0).normalize() },
-      uSunDir: { value: new THREE.Vector3(-0.8, 0.3, 0.2).normalize() },
+      uMoon1: { value: SKY_BODIES.moon1.dir.clone() },
+      uMoon2: { value: SKY_BODIES.moon2.dir.clone() },
+      uGiant: { value: SKY_BODIES.giant.dir.clone() },
+      uSunDir: { value: SKY_SUN.clone() },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -31,6 +41,7 @@ export function createSky(): THREE.Mesh {
       uniform float uTime; uniform vec3 uMoon1; uniform vec3 uMoon2; uniform vec3 uGiant; uniform vec3 uSunDir;
       varying vec3 vDir;
       ${GLSL_NOISE}
+      ${GLSL_SKY_BASE}
 
       // Scheibe um Richtung c mit Winkelradius r → (lokale Koordinaten, Maske)
       vec3 disc(vec3 d, vec3 c, float r){
@@ -55,9 +66,8 @@ export function createSky(): THREE.Mesh {
       void main(){
         vec3 d = normalize(vDir);
         float h = d.y;
-        // Grundverlauf: fast schwarz oben, violetter Dunst am Horizont
-        vec3 col = mix(vec3(0.03, 0.015, 0.07), vec3(0.006, 0.004, 0.02), smoothstep(0.0, 0.6, h));
-        col += vec3(0.10, 0.03, 0.16) * exp(-abs(h) * 9.0);
+        // Grundverlauf: fast schwarz oben, violetter Dunst am Horizont (gemeinsam mit der Fern-Atmosphäre)
+        vec3 col = skyBase(d);
 
         // Nebel (Emissions- und Dunkelwolken) – 3D-Noise direkt auf dem Richtungsvektor.
         // Früher: 2D-Noise auf dem Azimut-Winkel (arctan von z/x) → Sprung von +π auf −π in Richtung −X = Naht

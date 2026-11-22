@@ -307,6 +307,18 @@ export class InteractionController {
   }
 
   /** Hat dieser Zeiger gerade eine greifbare Figur (Nah- oder Säulen-Greifen)? */
+  /** Getragene Figur (für die Posen-Übertragung) – die erste, falls mehrere Zeiger tragen. */
+  heldPiece(): PieceView | null {
+    for (const st of this.states.values()) if (st.held) return st.held;
+    return null;
+  }
+
+  /** Feld unter dem Zeiger (Desktop: für das Zeiger-Licht beim Gegner). */
+  hoverSquare(): Square | null {
+    for (const st of this.states.values()) if (st.hoverSquare) return st.hoverSquare;
+    return null;
+  }
+
   hasTarget(id: string): boolean {
     const st = this.states.get(id);
     return !!st && (!!st.grabTarget || !!st.columnTarget || !!st.held);

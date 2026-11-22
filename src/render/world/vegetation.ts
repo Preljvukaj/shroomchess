@@ -228,6 +228,8 @@ interface ShroomInstance {
   species: number;
   /** feste LOD-Stufe (z. B. Baby-Pilze) statt Zonen-Zuordnung */
   fixedLod?: 0 | 1 | 2;
+  /** gehört zum Mittelbereich (bei zu wenig FPS als Erstes ausgedünnt) */
+  mid?: boolean;
 }
 
 const debugGround = () => !!(globalThis as unknown as { __myzelDebugGround?: boolean }).__myzelDebugGround;
@@ -294,8 +296,12 @@ function buildSpeciesMeshes(list: ShroomInstance[], sway: number, rng: () => num
     perLod.forEach((items, lod) => {
       if (!items.length) return;
       const geo = speciesGeometry(sp, details[lod], 77 + si * 101 + lod * 7);
+      // Mittelbereich ans Ende sortieren → zur Laufzeit per mesh.count ausdünnbar
+      items.sort((x, y) => Number(!!x.it.mid) - Number(!!y.it.mid));
       const attrs = attachInstanceAttributes(geo, items.length);
       const mesh = new THREE.InstancedMesh(geo, speciesMaterial(sp, lod === 2 ? 0 : sway), items.length);
+      const firstMid = items.findIndex((x) => x.it.mid);
+      if (firstMid >= 0) mesh.userData = { midStart: firstMid, total: items.length };
       const m = new THREE.Matrix4();
       items.forEach(({ it, slot }, i) => {
         const s = it.p.scale;
@@ -409,11 +415,12 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
     const scale = 0.05 + rng() * 0.14;
     all.push({ p: groundPlace(b, rng, x, z, scale, footOf(SPECIES[par.species], scale), { maxTiltDeg: 15 }), species: par.species, fixedLod: 1 });
   }
-  // Hinter dem Wall und weit weg: dichte Büschel (Fern-LOD bzw. Low-Poly, automatisch per Zone)
-  for (const pt of clustered(profile.farShrooms, avgRim + 1.5, avgRim + 12, 3, 6, 0.3)) {
+  // Mittelbereich hinter dem Senkenrand: dicht an dicht, überlappende Hüte (Fern-LOD). Endet vor der Überblendzone
+  // zur „sehr fern“-Stufe; dahinter übernimmt der Dschungelwall (farRings.ts).
+  for (const pt of clustered(profile.farShrooms, avgRim + 1.2, avgRim + 7.5, 2.2, 6, 0.3)) {
     const si = Math.floor(rng() * SPECIES.length);
-    const scale = 1.2 + rng() * 3.5;
-    all.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 12 }), species: si });
+    const scale = 1.4 + rng() * 3.8;
+    all.push({ p: groundPlace(b, rng, pt.x, pt.z, scale, footOf(SPECIES[si], scale), { maxTiltDeg: 12 }), species: si, mid: true });
   }
   for (const pt of clustered(profile.vfarShrooms, avgRim + 10, avgRim + 32, 4, 9, 0.3)) {
     const si = nearSpecies[Math.floor(rng() * nearSpecies.length)].i;
@@ -456,6 +463,12 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
   placeFlora('coral', Math.round(fl.coral * 0.5), avgRim - 0.5, avgRim + 14, 2.0, 4.5, 3.0, 6);
   placeFlora('leaf', Math.round(fl.leaf * 0.5), avgStart + 0.5, avgRim + 2, 0.9, 1.8, 1.2, 3);
   placeFlora('leaf', Math.round(fl.leaf * 0.5), avgRim - 0.5, avgRim + 14, 2.0, 4.0, 3.0, 5);
+  // Mittelbereich: zusätzliche Riesenblätter, Korallen und Fächer dicht an dicht (am Ende der Listen → ausdünnbar)
+  const midFrom: Record<string, number> = {};
+  for (const k of ['leaf', 'coral', 'fan'] as const) midFrom[k] = floraInst[k].length;
+  placeFlora('leaf', Math.round(profile.midFlora * 0.4), avgRim + 1, avgRim + 7.5, 2.5, 5.0, 2.5, 5);
+  placeFlora('coral', Math.round(profile.midFlora * 0.35), avgRim + 1, avgRim + 7.5, 2.5, 5.0, 2.5, 5);
+  placeFlora('fan', Math.round(profile.midFlora * 0.25), avgRim + 1, avgRim + 4, 2.0, 3.5, 2.0, 4);
 
   // --- Steine: am Hangfuß, auf den Hängen, oben am Rand; große Steine eher weiter außen ---
   const rocks: { p: Placement; kind: number }[] = [];
@@ -511,13 +524,19 @@ export function createVegetation(profile: QualityProfile, b: Basin): Vegetation 
   }
 
   for (const kind of floraKinds) {
-    const perLod: { p: Placement; slot: LodSlot }[][] = [[], [], []];
-    for (const p of floraInst[kind]) for (const slot of lodSlots(b, p.pos.x, p.pos.z, MAXLOD[kind])) perLod[slot.lod].push({ p, slot });
+    const perLod: { p: Placement; slot: LodSlot; mid: boolean }[][] = [[], [], []];
+    floraInst[kind].forEach((p, i) => {
+      const mid = midFrom[kind] !== undefined && i >= midFrom[kind];
+      for (const slot of lodSlots(b, p.pos.x, p.pos.z, MAXLOD[kind])) perLod[slot.lod].push({ p, slot, mid });
+    });
     perLod.forEach((items, lod) => {
       if (!items.length) return;
+      items.sort((x, y) => Number(x.mid) - Number(y.mid));
       const geo = floraGeometry(kind, lod as 0 | 1 | 2, 31);
       const attrs = floraInstanceAttributes(geo, items.length);
       const mesh = new THREE.InstancedMesh(geo, floraMaterial(kind), items.length);
+      const firstMid = items.findIndex((x) => x.mid);
+      if (firstMid >= 0) mesh.userData = { midStart: firstMid, total: items.length };
       const m = new THREE.Matrix4();
       items.forEach(({ p, slot }, i) => {
         m.compose(p.pos, p.quat, new THREE.Vector3(p.scale, p.scale, p.scale));

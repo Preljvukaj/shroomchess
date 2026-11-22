@@ -402,3 +402,27 @@ Spiel-Sounds laufen auf einem eigenen Bus und haben immer Vorrang.
 Messung (Headless, Draw Calls / Dreiecke): Low 93 / 301k, Medium 96 / 541k, High 117 / 1,59 Mio. Reduzieren war nicht nötig.
 Auf der Quest regelt zusätzlich der FPS-Wächter die Insekten. Die Quest-FPS selbst sind nicht gemessen.
 
+## Änderungsrunde 6 (Steintafel, Figurenkanten, Gegner-Animation, M3, M4, Fern-Dschungel, Asteroiden)
+
+**Stand vor Beginn (M3/M4):** Vorhanden waren Raumcode-Erzeugung, `?room=`-Routing, die Host/Beitreten-Oberfläche (gesperrt) und die Kalibrierungs-Mathematik (`calibration.ts`). Es fehlten Server, `net/`, Avatare, der Kalibrierungsablauf in VR und die Spielanbindung.
+
+**D61 – Steintafel:** Dreiseitiges Prisma an der Längsseite, bevorzugt knapp hinter der Boundary, aber höchstens so weit seitlich, dass kein Spieler beide Schauflächen sieht (Winkel ≤ ~51°). Die Schauflächen stehen mit β = 0,75 α etwas flacher als die Blickrichtung. 3 Draw Calls (Stein, BatchedText, Reliefs); Text wird nur bei Änderung gesetzt.
+
+**D62 – Figurenkanten:** Eigener Drehkörper-Builder mit Segmentzahl pro Profilring, Ringe unterschiedlicher Zahl werden nach Winkel vernäht (keine T-Kreuzungen, keine Risse). Damit ist keine Teilbarkeit der Segmentzahlen nötig. Das ist die bevorzugte Variante statt pauschal +50 %.
+
+**D63 – Gegner-Animation und Uhr:** Die Uhr des lokalen Spielers startet mit einer Gutschrift in Höhe der Animationsdauer (`ChessClock.press(color, graceMs)`). Online legt der Host die Gutschrift nach der Animationseinstellung des Empfängers fest, live sichtbare VR-Hände bekommen keine. Lichess: Die Server-Uhr ist maßgeblich, eine Gutschrift ist nicht möglich, daher dort der Vorschlag „Schnell“.
+
+**D64 – Netz:** Der Server ist zustandslos bezüglich der Partie. Raumcodes werden clientseitig vorgeschlagen, bei Kollision neu gewürfelt. Kanäle `game` (zuverlässig) und `pose` (unzuverlässig) sind ausgehandelte DataChannels. Kommt P2P nicht in 7 s zustande, läuft ein Relay über den WebSocket. Bei Abbruch pausiert der Host die Uhren unabhängig davon, wer die Verbindung verlor.
+
+**D65 – Posen in Brett-Koordinaten:** Posen werden im lokalen Raum von `board.root` übertragen. Online erscheint der Gegner so automatisch auf der anderen Seite des eigenen (anders großen) Bretts. In der Co-Location sind beide Bretter deckungsgleich, also genügt dasselbe Format.
+
+**D66 – Co-Location-Ablauf:** Der Gast rechnet die Transformation selbst (`solveGuestToHost`) aus der Host-Pose und seiner Pose. Brettmitte ist der Mittelpunkt der Köpfe, die Größe kommt aus der Host-Boundary an dieser Stelle (`colocBoard`). Fehlt Platz, wird mit 0,25 m Abstand versucht. Den Abklatsch-Fehler berechnet das Spiel als Abstand der verfolgten Spitzen minus 3 cm Kontaktabstand.
+
+**D67 – Kopfmitte:** Die XR-Kamera von three.js r187 liegt auf dem linken Auge. Für Kalibrierung und Avatar-Pose zählt die Mitte beider Augen; sonst addieren sich Rücken an Rücken etwa 6 cm Fehler (in der Simulation nachgewiesen und behoben).
+
+**D68 – Fern-Dschungel:** Wall und Ring sind je ein Mesh. Das Gelände reicht unter den Ring, dessen Fuß 3 m im Boden steckt. Den Raycast-Test (`tests/horizon.test.ts`) erfüllen allein Gelände und Ring. Die alte „sehr fern“-Pilzzone wird vom Wall ersetzt, das spart Draw Calls. Der Mittelbereich liegt am Ende der Instanzlisten und lässt sich per `mesh.count` ausdünnen. Gefunden dabei: Das Geländegitter war falsch herum gewunden (Normalen nach unten) und wurde nie gezeichnet; das ist jetzt korrigiert.
+
+**D69 – Asteroiden:** Großkreisbahnen auf der Himmelskugel mit Elevation ≥ 25° und Abstand zu Monden und Gasriese. Gerendert wird wie der Himmel nur mit der Kamera-Rotation und xyww (stereo-identisch, kein Tiefenkonflikt). Ohne Ton (optional erlaubt, weggelassen).
+
+**D70 – Performance:** Reihenfolge beim Reduzieren zur Laufzeit: Mitteldichte → Insekten → Blasen → Pose-Rate (min. 10/20 Hz). Medium bleibt bei ~590k Dreiecken, weil die unveränderte nahe Flora und die Pilze ~400k ausmachen. Auf der Quest ist Low (345k) der Standard. Echte Quest-FPS sind nicht gemessen.
+

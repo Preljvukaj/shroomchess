@@ -131,7 +131,8 @@ export function buildTerrainGrid(b: Basin, angular = 96, wallRings = 18, plateau
   ringsPerAngle.push((t, rb) => rb + b.rimStart(t) * 0.5);
   ringsPerAngle.push((t, rb) => rb + b.rimStart(t));
   for (let j = 1; j <= wallRings; j++) ringsPerAngle.push((t, rb) => rb + b.rimStart(t) + b.wallWidth(t) * (j / wallRings));
-  for (let j = 1; j <= 4; j++) ringsPerAngle.push((t, rb) => rb + b.rimStart(t) + b.wallWidth(t) + (plateau * j) / 4);
+  const pr = plateau > 20 ? 8 : 4;
+  for (let j = 1; j <= pr; j++) ringsPerAngle.push((t, rb) => rb + b.rimStart(t) + b.wallWidth(t) + (plateau * j) / pr);
   const rings = ringsPerAngle.length;
   const positions = new Float32Array(angular * rings * 3);
   for (let a = 0; a < angular; a++) {
@@ -153,7 +154,8 @@ export function buildTerrainGrid(b: Basin, angular = 96, wallRings = 18, plateau
     for (let r = 0; r < rings - 1; r++) {
       const p = a * rings + r;
       const q = a2 * rings + r;
-      idx.push(p, p + 1, q, q, p + 1, q + 1);
+      // Umlaufsinn so, dass die Vorderseite nach OBEN zeigt (vorher nach unten → Gelände wurde weggecullt)
+      idx.push(p, q, p + 1, q, q + 1, p + 1);
     }
   }
   return { positions, index: new Uint32Array(idx), rings };

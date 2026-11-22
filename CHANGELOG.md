@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 – Online-Mehrspieler, Co-Location, Steintafel, Gegner-Animation, Fern-Dschungel, Asteroiden
+
+- **Steintafel** neben dem Brett statt schwebender Infos (Uhren, Status, letzte 10 Halbzüge, Reliefs, Namen, Verbindung), zwei Schauflächen, durchscheinend unter 0,3 m. Desktop-Overlay nur, wenn die Tafel nicht im Bild ist (oder „Infos als Overlay“).
+- **Figurenkanten:** breite Querschnitte (> 60 % des Maximalradius) mit 1,5× Segmenten, nahtlos vernäht. Dreiecke aller 32 Figuren vorher → nachher: Low 33.608 → 39.260, Medium 47.208 → 55.372, High 64.208 → 75.512. Schalen-Minis höchstens +25 %.
+- **Gegner-Animation** (Langsam/Normal/Schnell): Vorwarnung, Anheben, Bogen, Aufsetzen mit Sporenstaub (1,8–2,4 s); Rochade nacheinander, Opfer löst sich erst unter dem Angreifer auf. Uhr-Gutschrift für die Animationszeit (außer Lichess). Bei Bullet/Blitz wird „Schnell“ vorgeschlagen.
+- **Meilenstein 3 – Online:** Signaling-Server (`server/`), WebRTC-DataChannel mit WS-Relay-Fallback, Raumcode/Link/QR, Host-Autorität, Uhr-Abgleich mit Ping, Posen-Interpolation, Avatare (Sporenwesen, Desktop-Kopf mit Zeiger-Licht), live getragene Figuren, Remis/Aufgabe/Rücknahme/Revanche, Emotes, optionaler Sprachchat, Reconnect bis 2 min, Pause bei Abbruch.
+- **Meilenstein 4 – Co-Location:** Host-Boundary an den Gast, Rücken-an-Rücken-Kalibrierung (2 s halten, 3-s-Countdown, gemittelte Erfassung), Abklatsch-Check mit Feinjustierung, Neukalibrierung bei Reset/Tracking-Verlust, Nähe-Warnung (1 m / 0,5 m), Posen mit 30 Hz.
+- **Fern-Dschungel:** Mittelbereich 2–2,5× dichter (zur Laufzeit ausdünnbar), 3-reihiger Dschungelwall, Horizontring (je 1 Draw Call), Fern-Atmosphäre in Himmelsfarbe. Fehler behoben: Das Gelände zeigte mit der Rückseite nach oben und wurde weggecullt (die moosgrünen Hänge sind jetzt sichtbar).
+- **Asteroiden, Kometen, Sternschnuppen** am Himmel (2 Draw Calls, im Unendlichen gerendert) und auf der Startseite.
+- **Performance** (Headless, Draw Calls/Dreiecke): Low 91/345k (mit zwei verbundenen Spielern 93/349k), Medium 92/590k, High 115/1,7 Mio.
+- **Tests:** 188 (vorher 114), dazu die Co-Location-Simulation `scripts/sim/coloc-sim.mjs` (Abweichung < 1 mm).
+
 ## 0.6.0 – Licht statt Konturen, Steinrahmen, Steine, Lavalampen-Blasen, Brummer, ruhigerer Klang
 
 - **Himmel ohne Naht:** Die Naht kam vom Nebel. Er war als 2D-Noise über den Azimut (`atan`) berechnet, und der springt in −X von +π

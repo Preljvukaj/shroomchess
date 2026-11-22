@@ -77,3 +77,61 @@ export function fineTune(T: Rigid2D, dYaw: number, dx: number, dz: number, pivot
   const S: Rigid2D = { yaw: 0, t: { x: dx, z: dz } };
   return composeRigid(S, composeRigid(R, T));
 }
+
+/** Mehrere Frames mitteln (Zittern glätten): Mittelwert der Position, zirkulärer Mittelwert des Yaw. */
+export function averagePoses(samples: FloorPose[]): FloorPose {
+  if (!samples.length) throw new Error('keine Samples');
+  let x = 0, z = 0, s = 0, c = 0;
+  for (const p of samples) {
+    x += p.pos.x;
+    z += p.pos.z;
+    s += Math.sin(p.yaw);
+    c += Math.cos(p.yaw);
+  }
+  return { pos: { x: x / samples.length, z: z / samples.length }, yaw: Math.atan2(s, c) };
+}
+
+/** Boundary (oder beliebiges Polygon) mit einer starren Transformation umrechnen. */
+export function transformRegion(T: Rigid2D, region: V2[]): V2[] {
+  return region.map((p) => applyRigid(T, p));
+}
+
+export interface ColocBoard {
+  center: V2;
+  yaw: number;
+  squareSize: number;
+  totalSide: number;
+  /** passt nur mit verringertem Sicherheitsabstand */
+  tight: boolean;
+}
+
+/**
+ * Brett-Pose für Co-Location im Host-Raum: Mittelpunkt zwischen beiden Köpfen = Brettmitte, Ausrichtung so, dass
+ * jeder geradeaus zu SEINER Grundreihe läuft, Größe aus der Host-Boundary an genau dieser Stelle
+ * (Brett + Rahmen mit Sicherheitsabstand). `fitHalf(center, yaw, margin)` = größte halbe Kantenlänge (boardFit).
+ */
+export function colocBoard(
+  host: FloorPose,
+  hostColor: 'w' | 'b',
+  offset: number,
+  frameFactor: number,
+  fitHalf: (center: V2, yaw: number, margin: number) => number,
+  opts: { margin?: number; maxSquare?: number; minSquare?: number } = {},
+): ColocBoard {
+  const center = calibrationMidpoint(host, offset);
+  const yaw = desiredBoardYaw(host.yaw, hostColor);
+  const n = 8 + 2 * frameFactor;
+  const maxSquare = opts.maxSquare ?? 0.6;
+  const minSquare = opts.minSquare ?? 0.2;
+  let margin = opts.margin ?? 0.5;
+  let half = fitHalf(center, yaw, margin);
+  let tight = false;
+  if ((2 * half) / n < minSquare) {
+    // knapp: mit kleinerem Abstand versuchen (Boundary-Warnung bleibt aktiv)
+    margin = 0.25;
+    half = fitHalf(center, yaw, margin);
+    tight = true;
+  }
+  const squareSize = Math.max(0.12, Math.min(maxSquare, (2 * half) / n));
+  return { center, yaw, squareSize, totalSide: squareSize * n, tight };
+}

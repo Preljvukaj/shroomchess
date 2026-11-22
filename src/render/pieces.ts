@@ -76,11 +76,98 @@ export const GRIP_HEIGHT: Record<PieceSymbol, number> = {
   p: 0.505, r: 0.545, b: 0.725, q: 0.9, k: 1.0, n: 0.63,
 };
 
-function lathe(profile: P[], segments: number): THREE.BufferGeometry {
-  const pts = profile.map(([r, y]) => new THREE.Vector2(r, y));
-  const g = new THREE.LatheGeometry(pts, segments);
-  g.deleteAttribute('uv');
+/** Anteil des Maximalradius, ab dem ein Querschnitt als „breit“ gilt (Fuß, Kragen, Wülste, Krone, Turmkopf). */
+export const WIDE_THRESHOLD = 0.6;
+/** Mehr Segmente an breiten Querschnitten (Vorgabe: +50 %). */
+export const WIDE_FACTOR = 1.5;
+
+/** Segmentzahl je Profilpunkt: breite Querschnitte × factor, schmale unverändert, Achspunkte (r = 0) = 1. */
+export function ringSegments(profile: P[], segments: number, factor = WIDE_FACTOR): number[] {
+  const rMax = Math.max(...profile.map(([r]) => r));
+  const wide = Math.round(segments * factor);
+  return profile.map(([r]) => (r < 1e-6 ? 1 : r > WIDE_THRESHOLD * rMax ? wide : segments));
+}
+
+/**
+ * Drehkörper mit Segmentzahl pro Ring. Benachbarte Ringe gleicher Zahl → Vierecke; unterschiedlicher Zahl →
+ * „Naht“: beide Ringe werden nach Winkel zusammen abgelaufen und mit Dreiecken verbunden (jede Kante
+ * gehört genau zwei Dreiecken → kein Spalt, gemeinsame Vertices → kein Shading-Sprung). Achspunkte (r = 0)
+ * sind ein einzelner Pol-Vertex mit Fächer. Die Profilpunkte (Silhouette) bleiben exakt erhalten.
+ */
+export function stitchedLathe(profile: P[], counts: number[]): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const ringStart: number[] = [];
+  profile.forEach(([r, y], k) => {
+    ringStart.push(pos.length / 3);
+    const n = counts[k];
+    if (n === 1) pos.push(0, y, 0);
+    else for (let j = 0; j < n; j++) {
+      const a = (j / n) * Math.PI * 2;
+      pos.push(Math.sin(a) * r, y, Math.cos(a) * r);
+    }
+  });
+  const idx: number[] = [];
+  const v = (k: number, j: number) => ringStart[k] + (counts[k] === 1 ? 0 : ((j % counts[k]) + counts[k]) % counts[k]);
+  for (let k = 0; k < profile.length - 1; k++) {
+    const na = counts[k];
+    const nb = counts[k + 1];
+    if (na === 1 && nb === 1) continue;
+    if (na === 1 || nb === 1) {
+      // Fächer zum Pol
+      const ring = na === 1 ? k + 1 : k;
+      const pole = na === 1 ? k : k + 1;
+      const n = counts[ring];
+      for (let j = 0; j < n; j++) {
+        if (pole === k) idx.push(v(pole, 0), v(ring, j), v(ring, j + 1));
+        else idx.push(v(ring, j), v(pole, 0), v(ring, j + 1));
+      }
+      continue;
+    }
+    // Naht bzw. Vierecke: beide Ringe nach Winkel ablaufen
+    let i = 0;
+    let j = 0;
+    while (i < na || j < nb) {
+      const ai = (i + 1) / na;
+      const bj = (j + 1) / nb;
+      if (j >= nb || (i < na && ai <= bj - 1e-9)) {
+        idx.push(v(k, i), v(k + 1, j), v(k, i + 1));
+        i++;
+      } else {
+        idx.push(v(k, i), v(k + 1, j), v(k + 1, j + 1));
+        j++;
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  // Orientierung: Normalen nach außen (Profil läuft von unten nach oben) – Vorzeichen per Volumen prüfen
+  let vol = 0;
+  const p = g.getAttribute('position');
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+  for (let t = 0; t < idx.length; t += 3) {
+    A.fromBufferAttribute(p, idx[t]);
+    B.fromBufferAttribute(p, idx[t + 1]);
+    C.fromBufferAttribute(p, idx[t + 2]);
+    vol += A.dot(B.clone().cross(C));
+  }
+  if (vol < 0) {
+    for (let t = 0; t < idx.length; t += 3) [idx[t + 1], idx[t + 2]] = [idx[t + 2], idx[t + 1]];
+    g.setIndex(idx);
+  }
+  g.computeVertexNormals();
   return g;
+}
+
+function lathe(profile: P[], segments: number, factor = WIDE_FACTOR): THREE.BufferGeometry {
+  return stitchedLathe(profile, ringSegments(profile, segments, factor));
+}
+
+/** Drehkörper-Teil einer Figur (für Tests: Segmentzahlen, geschlossene Hülle). */
+export function pieceLathe(type: PieceSymbol, segments: number, factor = WIDE_FACTOR): { geo: THREE.BufferGeometry; profile: P[]; counts: number[] } {
+  const profile = type === 'n' ? KNIGHT_BASE : PROFILES[type];
+  const counts = ringSegments(profile, segments, factor);
+  return { geo: stitchedLathe(profile, counts), profile, counts };
 }
 
 function rookMerlons(segments: number): THREE.BufferGeometry {
@@ -122,8 +209,10 @@ function kingCross(): THREE.BufferGeometry {
 }
 
 /** Springerkopf: Seitenprofil extrudiert und abgeschrägt, auf einen gedrechselten Sockel gesetzt. */
-function knightGeometry(segments: number): THREE.BufferGeometry {
-  const base = lathe([...scaleBase(0.92), [0.125, 0.08], [0.1, 0.11], [0.095, 0.15], [0.11, 0.165], [0.1, 0.18], [0.07, 0.19], [0, 0.19]], segments);
+const KNIGHT_BASE: P[] = [...scaleBase(0.92), [0.125, 0.08], [0.1, 0.11], [0.095, 0.15], [0.11, 0.165], [0.1, 0.18], [0.07, 0.19], [0, 0.19]];
+
+function knightGeometry(segments: number, factor: number): THREE.BufferGeometry {
+  const base = lathe(KNIGHT_BASE, segments, factor);
   // Profil in X(vorne)/Y(oben); Einheiten wie Königshöhe
   const s = new THREE.Shape();
   const pts: P[] = [
@@ -148,15 +237,18 @@ function knightGeometry(segments: number): THREE.BufferGeometry {
 
 const cache = new Map<string, THREE.BufferGeometry>();
 
-/** Geometrie in Einheitshöhe (König = 1). Wird beim Erzeugen der Figur skaliert. */
-export function pieceGeometry(type: PieceSymbol, segments = 28): THREE.BufferGeometry {
-  const key = `${type}:${segments}`;
+/**
+ * Geometrie in Einheitshöhe (König = 1). Wird beim Erzeugen der Figur skaliert.
+ * `factor`: Segment-Faktor für breite Querschnitte (Brettfiguren 1,5; ferne Stufen wie Schalen-Minis ≤ 1,25).
+ */
+export function pieceGeometry(type: PieceSymbol, segments = 28, factor = WIDE_FACTOR): THREE.BufferGeometry {
+  const key = `${type}:${segments}:${factor}`;
   const hit = cache.get(key);
   if (hit) return hit;
   let g: THREE.BufferGeometry;
-  if (type === 'n') g = knightGeometry(segments);
+  if (type === 'n') g = knightGeometry(segments, factor);
   else {
-    const parts = [lathe(PROFILES[type], segments)];
+    const parts = [lathe(PROFILES[type], segments, factor)];
     if (type === 'r') parts.push(rookMerlons(segments));
     if (type === 'q') parts.push(queenCoronet());
     if (type === 'k') parts.push(kingCross());

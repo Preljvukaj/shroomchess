@@ -12,6 +12,11 @@
 import net from 'node:net';
 import os from 'node:os';
 import { createServer } from 'vite';
+import { fork } from 'node:child_process';
+
+// Signaling-Server (Online/Co-Location) gleich mitstarten – Vite leitet /signal dorthin weiter
+const signaling = fork(new URL('../server/index.js', import.meta.url), [], { env: { ...process.env, PORT: '8787' } });
+process.on('exit', () => signaling.kill());
 
 const PUBLIC_PORT = Number(process.env.PORT ?? 5173);
 const VITE_PORT = PUBLIC_PORT + 1;

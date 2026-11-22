@@ -44,6 +44,28 @@ uniform vec3 uFogColor; uniform float uFogDensity;
 vec3 applyFog(vec3 col, float dist){ float f = 1.0 - exp(-pow(uFogDensity * dist, 2.0)); return mix(col, uFogColor, clamp(f, 0.0, 1.0)); }
 `;
 
+/**
+ * Grundverlauf des Himmels (ohne Nebelwolken/Sterne) – identisch im Himmels-Shader und in der Fern-Atmosphäre,
+ * damit Dschungelwall und Horizontring am Horizont exakt in die Farbe des unteren Himmels übergehen.
+ */
+export const GLSL_SKY_BASE = /* glsl */ `
+vec3 skyBase(vec3 d){
+  float h = d.y;
+  vec3 col = mix(vec3(0.03, 0.015, 0.07), vec3(0.006, 0.004, 0.02), smoothstep(0.0, 0.6, h));
+  col += vec3(0.10, 0.03, 0.16) * exp(-abs(h) * 9.0);
+  return col;
+}
+/** Fern-Atmosphäre: mit der Entfernung (und knapp über dem Boden etwas stärker) zur Himmelsfarbe in Blickrichtung. */
+vec3 applySkyFog(vec3 col, vec3 worldPos, float density){
+  vec3 v = worldPos - cameraPosition;
+  float dist = length(v);
+  vec3 dir = v / max(dist, 1e-4);
+  float hf = exp(-max(worldPos.y, 0.0) / 9.0);             // Höhennebel: unten dichter
+  float f = 1.0 - exp(-pow(density * dist, 1.6) * (0.75 + 0.5 * hf));
+  return mix(col, skyBase(vec3(dir.x, max(dir.y, 0.0), dir.z)), clamp(f, 0.0, 1.0));
+}
+`;
+
 /** Deterministischer Zufall (für reproduzierbare Vegetation). */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;

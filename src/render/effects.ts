@@ -48,7 +48,7 @@ export class Effects {
    * Figur löst sich in Sporen auf: Partikel aus dem Volumen der Figur steigen
    * spiralförmig auf und verblassen; die Figur selbst schrumpft und verblasst.
    */
-  dissolve(mesh: THREE.Mesh, color: THREE.Color, height: number): Promise<void> {
+  dissolve(mesh: THREE.Mesh, color: THREE.Color, height: number, dur = 0.7): Promise<void> {
     const count = 260;
     const world = new THREE.Vector3();
     mesh.getWorldPosition(world);
@@ -92,18 +92,59 @@ export class Effects {
     const pts = new THREE.Points(geo, mat);
     pts.frustumCulled = false;
     this.parent.add(pts);
-    this.bursts.push({ pts, t: 0, dur: 1.6 });
+    this.bursts.push({ pts, t: 0, dur: Math.max(1.6, dur * 2.2) });
 
     // Figur verblassen lassen (Material klonen, damit andere Figuren unberührt bleiben)
     const m = (mesh.material as THREE.MeshPhysicalMaterial).clone();
     m.transparent = true;
     mesh.material = m;
     const s0 = mesh.scale.x;
-    return this.tweenAsync(0.7, (k) => {
+    return this.tweenAsync(dur, (k) => {
       m.opacity = 1 - k;
       m.emissive.copy(color).multiplyScalar(k * 2);
       mesh.scale.set(s0 * (1 - 0.3 * k), s0 * (1 - 0.6 * k), s0 * (1 - 0.3 * k));
     });
+  }
+
+  /** Kleines Sporen-Staubwölkchen am Boden (weiches Aufsetzen). `local` in Koordinaten des Eltern-Objekts. */
+  dust(local: THREE.Vector3, color: THREE.Color, radius: number): void {
+    const count = 70;
+    const pos = new Float32Array(count * 3);
+    const seed = new Float32Array(count * 4);
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      pos.set([local.x + Math.cos(a) * radius * 0.4, local.y + 0.01, local.z + Math.sin(a) * radius * 0.4], i * 3);
+      seed.set([Math.random(), Math.random(), Math.random(), a], i * 4);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: { uK: { value: 0 }, uColor: { value: color.clone().lerp(new THREE.Color('#e8ffd8'), 0.5) }, uR: { value: radius } },
+      vertexShader: /* glsl */ `
+        attribute vec4 aSeed; uniform float uK; uniform float uR; varying float vA;
+        void main(){
+          vec3 p = position;
+          float e = 1.0 - (1.0 - uK) * (1.0 - uK);
+          p.x += cos(aSeed.w) * e * uR * (0.6 + aSeed.x);
+          p.z += sin(aSeed.w) * e * uR * (0.6 + aSeed.x);
+          p.y += sin(e * 3.14159) * uR * 0.25 * aSeed.y;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_Position = projectionMatrix * mv;
+          vA = (1.0 - uK) * (0.4 + 0.6 * aSeed.z);
+          gl_PointSize = (0.02 * uR * 10.0 + 0.006) * (300.0 / max(-mv.z, 0.3));
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor; varying float vA;
+        void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d) * vA * 0.6; gl_FragColor = vec4(uColor * a, a); }`,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    this.parent.add(pts);
+    this.bursts.push({ pts, t: 0, dur: 0.9 });
   }
 
   update(dt: number): void {

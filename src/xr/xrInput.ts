@@ -163,7 +163,17 @@ export class XRInput {
     return !!s && !!s.buttons[index] && !s.prevButtons[index];
   }
 
-  /** Gelenke für die Handflächen-Erkennung (nur Handtracking). */
+  /** Thumbstick einer Seite (x, y), Totzone 0,15. */
+  stick(handedness: Handedness): [number, number] {
+    const s = this.slots.find((x) => x.source?.gamepad && x.pointer.handedness === handedness);
+    const ax = s?.source?.gamepad?.axes ?? [];
+    const x = ax[2] ?? 0;
+    const y = ax[3] ?? 0;
+    const dz = (v: number) => (Math.abs(v) < 0.15 ? 0 : v);
+    return [dz(x), dz(y)];
+  }
+
+    /** Gelenke für die Handflächen-Erkennung (nur Handtracking). */
   palmJoints(handedness: Handedness): { wrist: THREE.Vector3; indexMeta: THREE.Vector3; pinkyMeta: THREE.Vector3 } | null {
     const s = this.slots.find((x) => x.source?.hand && x.pointer.handedness === handedness);
     if (!s) return null;

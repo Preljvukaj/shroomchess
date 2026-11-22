@@ -12,6 +12,8 @@ import { Highlights } from './highlights';
 import { PieceView } from './pieceView';
 import { KING_HEIGHT_PER_SQUARE, PLAYER_GLOW } from './pieces';
 import { PromotionPicker } from './promotion';
+import { type AnimSpeed, opponentTimeline } from './opponentAnim';
+import { easeInOut } from './effects';
 
 export interface BoardSceneOptions {
   squareSize: number;
@@ -45,6 +47,16 @@ export class BoardScene {
   private viewingFen: string | null = null;
   colorblind = false;
   markNoLegalMoves = false;
+  /**
+   * Soll dieser Zug langsam als Gegnerzug animiert werden? (KI, Lichess-Gegner, Online ohne Live-Pose.)
+   * Eigene Züge (per Hand/Maus) und Züge mit live sichtbarer Hand des Gegners bleiben schnell.
+   */
+  isOpponentMove: (m: AppliedMove) => boolean = () => false;
+  opponentSpeed: AnimSpeed = 'slow';
+  /** Dauer (s), die ein Gegnerzug mit den aktuellen Einstellungen dauert – für die Uhr-Gutschrift. */
+  opponentAnimDuration(m: AppliedMove): number {
+    return opponentTimeline(m, this.opponentSpeed).total;
+  }
 
   constructor(private game: ChessGame, private opts: BoardSceneOptions) {
     this.squareSize = opts.squareSize;
@@ -77,6 +89,11 @@ export class BoardScene {
 
   get busy(): boolean {
     return this.animating > 0 || this.promotion.active;
+  }
+
+  /** Wartet, bis keine Zug-Animation mehr läuft (eigener Zug wird erst danach geprüft). */
+  async idle(): Promise<void> {
+    while (this.animating > 0) await new Promise((r) => setTimeout(r, 30));
   }
 
   get isAnalysis(): boolean {
@@ -159,6 +176,8 @@ export class BoardScene {
     viewerYaw: number,
     submit: (from: Square, to: Square, promo: PieceSymbol) => boolean,
   ): Promise<boolean> {
+    // während der Gegner-Animation darf man schon greifen – geprüft wird erst danach
+    await this.idle();
     if (!this.game.isLegal(from, to)) return false;
     let promo: PieceSymbol = 'q';
     if (this.game.isPromotion(from, to)) {
@@ -171,6 +190,7 @@ export class BoardScene {
 
   private async onMove(m: AppliedMove): Promise<void> {
     if (this.viewingFen) this.syncAll();
+    if (this.droppedAt !== m.to && this.isOpponentMove(m)) return this.playOpponent(m);
     const mover = this.pieces.get(m.from);
     this.animating++;
     try {
@@ -216,6 +236,100 @@ export class BoardScene {
         mover.flash = 1;
         await this.effects.tweenAsync(0.4, () => undefined);
       }
+    } finally {
+      this.animating--;
+      this.refreshBaseHighlights();
+    }
+  }
+
+  /** Gegnerzug langsam und in Schritten abspielen (siehe opponentAnim.ts). */
+  private async playOpponent(m: AppliedMove): Promise<void> {
+    const { steps, total } = opponentTimeline(m, this.opponentSpeed);
+    const mover = this.pieces.get(m.from);
+    const victim = m.capturedSquare && m.captured ? this.pieces.get(m.capturedSquare) : undefined;
+    const rook = m.rookMove ? this.pieces.get(m.rookMove.from) : undefined;
+    // Zustand sofort umtragen (Interaktion/Markierungen sehen die neue Stellung)
+    if (victim && victim !== mover) {
+      this.pieces.delete(m.capturedSquare!);
+      victim.mesh.visible = true; // nicht mehr im Bündel – bis zum Auflösen selbst zeichnen
+    }
+    if (mover) {
+      this.pieces.delete(m.from);
+      this.pieces.set(m.to, mover);
+      mover.square = m.to;
+    }
+    if (rook && m.rookMove) {
+      this.pieces.delete(m.rookMove.from);
+      this.pieces.set(m.rookMove.to, rook);
+      rook.square = m.rookMove.to;
+    }
+    const actors = {
+      mover: mover ? { pv: mover, from: mover.root.position.clone(), to: squareCenter(m.to, this.squareSize), knight: m.piece === 'n' } : null,
+      rook: rook && m.rookMove ? { pv: rook, from: rook.root.position.clone(), to: squareCenter(m.rookMove.to, this.squareSize), knight: false } : null,
+    };
+    const lift = this.kingHeight * 0.28;
+    const fired = new Set<number>();
+    this.animating++;
+    try {
+      await this.effects.tweenAsync(total, (k) => {
+        const t = k * total;
+        steps.forEach((s, i) => {
+          const local = (t - s.start) / s.dur;
+          if (s.actor === 'victim') {
+            if (local >= 0 && !fired.has(i) && victim && victim !== mover) {
+              fired.add(i);
+              const where = victim.mesh.getWorldPosition(new THREE.Vector3());
+              victim.mesh.visible = true;
+              void this.effects.dissolve(victim.mesh, PLAYER_GLOW[victim.color], this.kingHeight, s.dur).then(() => victim.dispose());
+              this.bowls[m.color].add(m.captured!, victim.color, where.setY(where.y + this.kingHeight * 0.4), this.effects);
+            }
+            return;
+          }
+          const a = s.actor === 'mover' ? actors.mover : actors.rook;
+          if (!a) return;
+          const u = Math.min(1, Math.max(0, local));
+          if (local < 0) return;
+          const p = a.pv.root.position;
+          switch (s.kind) {
+            case 'glow':
+              a.pv.preGlow = Math.sin(Math.min(1, u * 1.4) * Math.PI * 0.5) * (local > 1 ? 0.6 : 1);
+              break;
+            case 'lift':
+              p.copy(a.from);
+              p.y = a.from.y + lift * easeInOut(u);
+              break;
+            case 'glide': {
+              const e = easeInOut(u);
+              p.lerpVectors(a.from, a.to, e);
+              p.y = a.from.y + lift + Math.sin(e * Math.PI) * this.kingHeight * (a.knight ? 0.45 : 0.18);
+              break;
+            }
+            case 'land': {
+              p.copy(a.to);
+              p.y = a.to.y + lift * (1 - (1 - (1 - u) * (1 - u)));
+              if (local >= 1 && !fired.has(i)) {
+                fired.add(i);
+                p.y = a.to.y;
+                a.pv.preGlow = 0;
+                this.effects.dust(new THREE.Vector3(a.to.x, this.board.surfaceY, a.to.z), PLAYER_GLOW[a.pv.color], this.squareSize * 0.45);
+              }
+              break;
+            }
+            case 'promote':
+              if (!fired.has(i) && m.promotion) {
+                fired.add(i);
+                a.pv.setType(m.promotion, this.opts.segments);
+                a.pv.flash = 1;
+              }
+              break;
+          }
+        });
+      });
+      for (const a of [actors.mover, actors.rook]) if (a) {
+        a.pv.root.position.copy(a.to);
+        a.pv.preGlow = 0;
+      }
+      if (m.promotion && mover && mover.type !== m.promotion) mover.setType(m.promotion, this.opts.segments);
     } finally {
       this.animating--;
       this.refreshBaseHighlights();

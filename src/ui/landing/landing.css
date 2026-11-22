@@ -70,3 +70,5 @@
   .top { min-height: 120px; padding: 18px; }
   .hero p { white-space: normal; }
 }
+.subbox .qr { display: flex; justify-content: center; margin: 0.5em 0; }
+.subbox .qr svg { width: 168px; height: 168px; background: #fff; border-radius: 8px; padding: 6px; }

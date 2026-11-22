@@ -50,32 +50,44 @@ export class ChessClock extends Emitter<ClockEvents> {
     return this.tc.initial > 0;
   }
 
-  /** Startet die Uhr für `color` (z. B. nach dem ersten Zug von Weiß für Schwarz). */
-  start(color: Color): void {
-    if (!this.enabled || this.flagged) return;
-    this.running = color;
-    this.startedAt = this.now();
+  get isRunning(): boolean {
+    return this.running !== null;
   }
 
-  /** `color` hat gezogen: Zeit abziehen, Inkrement gutschreiben, Gegneruhr starten. */
-  press(color: Color): void {
+  /** verstrichene Zeit des laufenden Zugs (eine Gutschrift/„Delay“ am Anfang zählt nicht) */
+  private elapsed(): number {
+    return Math.max(0, this.now() - this.startedAt);
+  }
+
+  /**
+   * Startet die Uhr für `color`. `graceMs`: Gutschrift am Zugbeginn (die Uhr bleibt so lange stehen) –
+   * für die langsame Animation des gegnerischen Zugs, damit sie nicht von der eigenen Bedenkzeit abgeht.
+   */
+  start(color: Color, graceMs = 0): void {
+    if (!this.enabled || this.flagged) return;
+    this.running = color;
+    this.startedAt = this.now() + Math.max(0, graceMs);
+  }
+
+  /** `color` hat gezogen: Zeit abziehen, Inkrement gutschreiben, Gegneruhr starten (optional mit Gutschrift). */
+  press(color: Color, graceForNextMs = 0): void {
     if (!this.enabled || this.flagged) return;
     if (this.running === color) {
-      this.remaining[color] -= this.now() - this.startedAt;
+      this.remaining[color] -= this.elapsed();
       this.remaining[color] += this.tc.increment * 1000;
     }
-    this.start(color === 'w' ? 'b' : 'w');
+    this.start(color === 'w' ? 'b' : 'w', graceForNextMs);
   }
 
   stop(): void {
-    if (this.running) this.remaining[this.running] -= this.now() - this.startedAt;
+    if (this.running) this.remaining[this.running] -= this.elapsed();
     this.running = null;
   }
 
   /** Aktueller Stand; löst bei Zeitüberschreitung einmalig `flag` aus. */
   read(): ClockState {
     const s: ClockState = { w: this.remaining.w, b: this.remaining.b, running: this.running };
-    if (this.running) s[this.running] -= this.now() - this.startedAt;
+    if (this.running) s[this.running] -= this.elapsed();
     if (this.running && s[this.running] <= 0 && !this.flagged) {
       const loser = this.running;
       s[loser] = 0;
@@ -90,10 +102,10 @@ export class ChessClock extends Emitter<ClockEvents> {
   }
 
   /** Übernimmt einen fremden Stand (Netzwerk-Host, Lichess). */
-  sync(state: ClockState): void {
+  sync(state: ClockState, elapsedMs = 0): void {
     this.remaining = { w: state.w, b: state.b };
     this.running = state.running;
-    this.startedAt = this.now();
+    this.startedAt = this.now() - elapsedMs;
   }
 }
 

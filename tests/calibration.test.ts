@@ -87,3 +87,46 @@ describe('Rücken-an-Rücken-Kalibrierung', () => {
     expectV(applyRigid(moved, { x: 0, z: 0 }), { x: G2H.t.x + 0.1, z: G2H.t.z - 0.05 });
   });
 });
+
+describe('Co-Location: Mitteln, Boundary-Transformation, Brett-Pose', () => {
+  it('Mittelung mehrerer Frames inkl. Yaw über ±π', async () => {
+    const { averagePoses } = await import('../src/xr/math/calibration');
+    const a = averagePoses([
+      { pos: { x: 1, z: 0 }, yaw: Math.PI - 0.02 },
+      { pos: { x: 1.02, z: 0.01 }, yaw: -Math.PI + 0.02 },
+      { pos: { x: 0.98, z: -0.01 }, yaw: Math.PI },
+    ]);
+    expect(a.pos.x).toBeCloseTo(1, 6);
+    expect(Math.abs(wrapAngle(a.yaw - Math.PI))).toBeLessThan(1e-6);
+  });
+
+  it('Boundary des Hosts landet beim Gast an derselben realen Stelle', async () => {
+    const { transformRegion } = await import('../src/xr/math/calibration');
+    const offset = 0.3;
+    const worldHost = { pos: { x: 0.4, z: -0.2 }, yaw: 1.1 };
+    const worldGuest = { pos: { x: worldHost.pos.x - forward(worldHost.yaw).x * offset, z: worldHost.pos.z - forward(worldHost.yaw).z * offset }, yaw: worldHost.yaw + Math.PI };
+    const host = applyRigidPose(hostFromWorld, worldHost);
+    const guest = applyRigidPose(guestFromWorld, worldGuest);
+    const G2H = solveGuestToHost(host, guest, offset);
+    // reale Boundary-Ecken
+    const worldRegion = [{ x: -2, z: -2 }, { x: 2.5, z: -2 }, { x: 2.5, z: 1.8 }, { x: -2, z: 1.8 }];
+    const hostRegion = worldRegion.map((p) => applyRigid(hostFromWorld, p));
+    const guestRegion = transformRegion(invertRigid(G2H), hostRegion);
+    worldRegion.forEach((p, i) => expectV(guestRegion[i], applyRigid(guestFromWorld, p), 1e-9));
+  });
+
+  it('Brett-Pose: Mitte zwischen den Köpfen, Größe aus der Host-Boundary, jeder schaut zu seiner Grundreihe', async () => {
+    const { colocBoard } = await import('../src/xr/math/calibration');
+    const { maxHalfSideAt } = await import('../src/xr/math/boardFit');
+    const region = [{ x: -2.5, z: -2.5 }, { x: 2.5, z: -2.5 }, { x: 2.5, z: 2.5 }, { x: -2.5, z: 2.5 }];
+    const host = { pos: { x: 0.15, z: 0 }, yaw: Math.PI / 2 }; // schaut nach −X
+    const b = colocBoard(host, 'w', 0.3, 0.45, (c, y, m) => maxHalfSideAt(region, c, y, m));
+    expect(b.center.x).toBeCloseTo(0.15 - forward(host.yaw).x * 0.15, 9);
+    expect(maxHalfSideAt(region, b.center, b.yaw, 0.5)).toBeGreaterThanOrEqual(b.totalSide / 2 - 1e-6);
+    // Host (Weiß) schaut beim Erfassen Richtung weiße Grundreihe: lokal +Z des Bretts
+    const toWhite = rotate({ x: 0, z: 1 }, b.yaw);
+    const f = forward(host.yaw);
+    expect(toWhite.x * f.x + toWhite.z * f.z).toBeCloseTo(1, 9);
+    expect(b.squareSize).toBeLessThanOrEqual(0.6);
+  });
+});

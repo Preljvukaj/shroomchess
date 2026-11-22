@@ -5,6 +5,7 @@
  *
  *   ?xremu=1               Quest 3 mit Controllern
  *   &hands=1               Handtracking statt Controller
+ *   &stereo=1              Stereo-Rendering (Kopfmitte = Kamera; für die Co-Location-Simulation)
  *   &bounds=4x3            Test-Spielfläche 4 × 3 m (IWER liefert selbst keine boundsGeometry);
  *                          ohne → manuelle Flächeneinrichtung (Ecken antippen)
  *
@@ -14,7 +15,8 @@
  */
 export async function installEmulator(params: URLSearchParams): Promise<void> {
   const { XRDevice, metaQuest3 } = await import('iwer');
-  const dev = new XRDevice(metaQuest3, { stereoEnabled: false });
+  // &stereo=1: echtes Stereo (Kamera = Kopfmitte wie auf der Brille); sonst Mono (linkes Auge, schneller)
+  const dev = new XRDevice(metaQuest3, { stereoEnabled: params.get('stereo') === '1' });
   dev.installRuntime();
   dev.position.set(0, 1.6, 1.4);
   if (params.get('hands') === '1') dev.primaryInputMode = 'hand';

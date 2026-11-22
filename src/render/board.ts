@@ -18,7 +18,7 @@ export function squareAt(x: number, z: number, s: number): Square | null {
   return frToSquare(f, r);
 }
 
-function stoneTexture(kind: 'moon' | 'basalt', seed: number): THREE.CanvasTexture {
+export function stoneTexture(kind: 'moon' | 'basalt', seed: number): THREE.CanvasTexture {
   const size = 256;
   const c = document.createElement('canvas');
   c.width = c.height = size;

@@ -5,6 +5,8 @@
  *   ?code=…&state=…       → Rückkehr aus dem Lichess-OAuth-Dialog
  *   ?error=…              → Lichess-Login abgebrochen
  *   ?autostart=engine|hotseat → Debug: Startseite überspringen
+ *   ?autostart=online|coloc&netroom=ABCD&role=host|guest&color=w&tc=5+3&name=…
+ *                         → Debug/Simulation: Netzwerkspiel ohne Startseite (zwei Fenster)
  *   sonst                 → Landingpage
  */
 export type Route =
@@ -12,7 +14,8 @@ export type Route =
   | { view: 'join'; room: string }
   | { view: 'oauth-callback'; code: string; state: string }
   | { view: 'oauth-error'; error: string }
-  | { view: 'autostart'; mode: 'engine' | 'hotseat' };
+  | { view: 'autostart'; mode: 'engine' | 'hotseat' }
+  | { view: 'autostart-net'; kind: 'online' | 'coloc'; room: string; role: 'host' | 'guest'; color: 'w' | 'b' | 'random'; tc: string; name: string; vr: boolean };
 
 /** Raumcodes: 4–8 Zeichen, nur gut unterscheidbare Großbuchstaben/Ziffern. */
 export const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -38,6 +41,21 @@ export function parseRoute(search: string): Route {
   }
   const auto = p.get('autostart');
   if (auto === 'engine' || auto === 'hotseat') return { view: 'autostart', mode: auto };
+  if (auto === 'online' || auto === 'coloc') {
+    const r = normalizeRoomCode(p.get('netroom') ?? '');
+    const col = p.get('color');
+    if (r)
+      return {
+        view: 'autostart-net',
+        kind: auto,
+        room: r,
+        role: p.get('role') === 'guest' ? 'guest' : 'host',
+        color: col === 'b' || col === 'random' ? col : 'w',
+        tc: p.get('tc') ?? 'none',
+        name: (p.get('name') ?? '').slice(0, 24),
+        vr: p.get('vr') === '1',
+      };
+  }
   return { view: 'landing' };
 }
 

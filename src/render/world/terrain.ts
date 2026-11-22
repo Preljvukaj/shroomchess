@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { GLSL_FOG, GLSL_NOISE, worldUniforms } from '../shared';
+import { GLSL_FOG, GLSL_NOISE, GLSL_SKY_BASE, worldUniforms } from '../shared';
 import { type Basin, buildTerrainGrid } from './basin';
 
 /**
  * Geländemesh der Senke: flacher Boden (y = 0) in der Spielfläche, bewachsene Wälle
  * (Moos, Wurzeln, leuchtende Myzel-Adern), dunkles Plateau dahinter. Ein Draw Call.
  */
-export function createTerrain(basin: Basin, angular = 96): THREE.Mesh {
-  const grid = buildTerrainGrid(basin, angular);
+export function createTerrain(basin: Basin, angular = 96, plateau = 14): THREE.Mesh {
+  const grid = buildTerrainGrid(basin, angular, 18, plateau);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(grid.positions, 3));
   geo.setIndex(new THREE.BufferAttribute(grid.index, 1));
@@ -29,6 +29,7 @@ export function createTerrain(basin: Basin, angular = 96): THREE.Mesh {
       varying vec3 vWorld; varying vec3 vN; varying float vDist;
       ${GLSL_NOISE}
       ${GLSL_FOG}
+      ${GLSL_SKY_BASE}
       float voronoiEdge(vec2 p){
         vec2 i = floor(p); vec2 f = fract(p); float d1 = 8.0, d2 = 8.0;
         for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){
@@ -81,7 +82,10 @@ export function createTerrain(basin: Basin, angular = 96): THREE.Mesh {
         // leuchtende Grasspitzen, vereinzelt
         float tip = step(0.985, hash12(floor(p * 30.0)));
         col += vec3(0.3, 1.0, 0.6) * tip * 0.12 * (0.6 + 0.4 * sin(uTime * 1.5 + p.x * 3.0));
-        gl_FragColor = vec4(applyFog(col, vDist), 1.0);
+        // nah: dunkler Szenen-Nebel; fern (unter Wall und Horizontring): dunkel-moosig, im Himmelsdunst verschwindend
+        vec3 nearC = applyFog(col, vDist);
+        vec3 farC = applySkyFog(col * 0.6, vWorld, 0.02);
+        gl_FragColor = vec4(mix(nearC, farC, smoothstep(18.0, 40.0, vDist)), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
