@@ -1,0 +1,1 @@
+var e=class{handlers={};on(e,t){return(this.handlers[e]??=new Set).add(t),()=>this.handlers[e]?.delete(t)}emit(e,t){this.handlers[e]?.forEach(e=>e(t))}};export{e as t};
